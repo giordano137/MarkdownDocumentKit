@@ -46,12 +46,12 @@ optional capability rather than a hard dependency.
 
 ## Status
 
-Early scaffolding. Not usable yet.
+Phase 1 done; not wired into the 137 app yet.
 
-- [ ] Phase 1: block layout core — headings, paragraphs (justified,
-      hyphenated), lists, fenced code blocks. Roughly what
-      `MarkdownDocumentRenderer` in the 137/macai app already does today,
-      moved here and made reusable.
+- [x] Phase 1: block layout core — headings, paragraphs (justified,
+      hyphenated), lists, fenced code blocks. `DocumentBlock`/`DocumentParser`
+      (platform-agnostic) + `DocumentRenderer` (macOS/AppKit; UIKit renderer
+      not implemented yet, model doesn't block it).
 - [ ] Phase 2: table layout — column widths, row heights, cell borders/
       padding, per-cell text wrapping.
 - [ ] Phase 3: callout boxes (`> [!NOTE]` / `[!TIP]` / `[!WARNING]` /
