@@ -63,6 +63,80 @@ import Testing
     #expect(blocks == [.codeBlock(lines: ["leftover line"])])
 }
 
+@Test func parsesSimpleTableWithAlignments() {
+    let markdown = """
+        | Left | Center | Right |
+        | :--- | :---: | ---: |
+        | a | b | c |
+        | d | e | f |
+        """
+    let blocks = DocumentParser.parse(markdown)
+    #expect(
+        blocks == [
+            .table(
+                header: ["Left", "Center", "Right"],
+                alignments: [.left, .center, .right],
+                rows: [["a", "b", "c"], ["d", "e", "f"]]
+            )
+        ]
+    )
+}
+
+@Test func tableWithoutAlignmentColonsUsesNoneAlignment() {
+    let markdown = "| A | B |\n| --- | --- |\n| 1 | 2 |"
+    let blocks = DocumentParser.parse(markdown)
+    #expect(blocks == [.table(header: ["A", "B"], alignments: [.none, .none], rows: [["1", "2"]])])
+}
+
+@Test func lineWithPipeButNoDelimiterRowIsNotATable() {
+    // A stray "|" in a normal sentence shouldn't be mistaken for a table just because the
+    // line contains a pipe — the very next line has to actually be a valid delimiter row.
+    let blocks = DocumentParser.parse("Speed | Velocity, same thing.\nNext paragraph.")
+    #expect(
+        blocks == [
+            .paragraph(text: "Speed | Velocity, same thing."),
+            .paragraph(text: "Next paragraph."),
+        ]
+    )
+}
+
+@Test func raggedTableRowsAreNormalizedToHeaderWidth() {
+    let markdown = "| A | B | C |\n| --- | --- | --- |\n| short |\n| way | too | many | cells |"
+    let blocks = DocumentParser.parse(markdown)
+    #expect(
+        blocks == [
+            .table(
+                header: ["A", "B", "C"],
+                alignments: [.none, .none, .none],
+                rows: [["short", "", ""], ["way", "too", "many"]]
+            )
+        ]
+    )
+}
+
+@Test func tableStopsAtBlankLine() {
+    let markdown = "| A | B |\n| --- | --- |\n| 1 | 2 |\n\nAfter the table."
+    let blocks = DocumentParser.parse(markdown)
+    #expect(
+        blocks == [
+            .table(header: ["A", "B"], alignments: [.none, .none], rows: [["1", "2"]]),
+            .paragraph(text: "After the table."),
+        ]
+    )
+}
+
+@Test func emptyCellSurvivesAsEmptyString() {
+    // GFM's usual convention for "same value as the row above" — no real rowspan concept,
+    // just an empty cell (see DocumentBlock.table's doc comment).
+    let markdown = "| A | B |\n| --- | --- |\n| x | y |\n|  | z |"
+    let blocks = DocumentParser.parse(markdown)
+    #expect(
+        blocks == [
+            .table(header: ["A", "B"], alignments: [.none, .none], rows: [["x", "y"], ["", "z"]])
+        ]
+    )
+}
+
 @Test func parsesMixedDocumentInOrder() {
     let markdown = """
         # Report

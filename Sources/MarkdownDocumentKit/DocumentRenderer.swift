@@ -15,7 +15,17 @@ import AppKit
 import Foundation
 
 public enum DocumentRenderer {
-    public static func attributedString(from blocks: [DocumentBlock], title: String) -> NSAttributedString {
+    /// US Letter (612pt wide) minus `PDFRenderer`'s own 54pt margins on each side — tables need
+    /// to know the eventual page's content width up front, since (unlike text) they're rasterized
+    /// once at a fixed pixel size rather than reflowed at layout time. Override if a consumer
+    /// renders to a different page size/margins than the 137 app's PDF export does.
+    public static let defaultContentWidth: CGFloat = 504
+
+    public static func attributedString(
+        from blocks: [DocumentBlock],
+        title: String,
+        contentWidth: CGFloat = defaultContentWidth
+    ) -> NSAttributedString {
         let result = NSMutableAttributedString()
         result.append(styledTitle(title))
 
@@ -33,6 +43,9 @@ public enum DocumentRenderer {
 
             case .codeBlock(let lines):
                 result.append(codeParagraph(lines))
+
+            case .table(let header, let alignments, let rows):
+                result.append(tableParagraph(header: header, alignments: alignments, rows: rows, contentWidth: contentWidth))
             }
         }
         return result
@@ -102,6 +115,45 @@ public enum DocumentRenderer {
             .paragraphStyle: style,
         ]
         return NSAttributedString(string: lines.joined(separator: "\n") + "\n", attributes: attributes)
+    }
+
+    // MARK: - Tables
+
+    /// Renders the table to an image (see `TableRenderer`) and wraps it as a single
+    /// `NSTextAttachment` on its own line — same "can't flow as text, so embed as an image"
+    /// approach the 137 app's `InlineMathImageRenderer` uses for formulas, just block-level
+    /// (full paragraph width, top-aligned) instead of inline/baseline-aligned.
+    private static func tableParagraph(
+        header: [String],
+        alignments: [TableAlignment],
+        rows: [[String]],
+        contentWidth: CGFloat
+    ) -> NSAttributedString {
+        guard let rendered = TableRenderer.render(header: header, alignments: alignments, rows: rows, maxWidth: contentWidth)
+        else {
+            // Falls back to a plain-text rendering of the table rather than silently dropping
+            // it — mirrors the 137 app's inline-math fallback for a formula SwiftMath can't
+            // parse (show the raw source, don't just disappear).
+            let plain = ([header] + rows).map { $0.joined(separator: " | ") }.joined(separator: "\n")
+            return codeParagraph(plain.components(separatedBy: "\n"))
+        }
+
+        let attachment = NSTextAttachment()
+        attachment.image = rendered.image
+        attachment.bounds = CGRect(origin: .zero, size: rendered.size)
+
+        let result = NSMutableAttributedString(attributedString: NSAttributedString(attachment: attachment))
+        result.append(NSAttributedString(string: "\n"))
+        // A blank *ordinary* line rather than `NSParagraphStyle.paragraphSpacing` on the
+        // attachment's own line — measured empirically (rendering real pages) that a raw
+        // CoreText/CTFramesetter pagination pass doesn't respect paragraph spacing around a
+        // `CTRunDelegate`-backed attachment run the way it does for normal text lines, and
+        // widening the run's own reported descent to fake a trailing gap moved the *next*
+        // block's line into the wrong place rather than adding clean space. A real line made of
+        // ordinary text has no such issue (confirmed: normal paragraph-to-paragraph spacing
+        // already renders correctly), so that's what creates the gap here.
+        result.append(NSAttributedString(string: "\n", attributes: [.font: NSFont.systemFont(ofSize: 40)]))
+        return result
     }
 
     // MARK: - Shared inline-Markdown + paragraph-style paragraph builder

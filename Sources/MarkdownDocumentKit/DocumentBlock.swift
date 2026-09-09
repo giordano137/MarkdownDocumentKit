@@ -7,6 +7,11 @@
 
 import Foundation
 
+/// Per-column alignment from a table's delimiter row (`:---`/`:---:`/`---:`/`---`).
+public enum TableAlignment: Equatable {
+    case none, left, center, right
+}
+
 /// One block-level element of a parsed document. Inline formatting (bold/italic/links) is
 /// *not* broken out here — it stays as literal Markdown inside each block's `text`/cell string,
 /// applied by whichever renderer consumes the block (see `DocumentRenderer.inlineAttributedString`
@@ -17,9 +22,14 @@ public enum DocumentBlock: Equatable {
     case paragraph(text: String)
     case listItem(ordered: Bool, number: Int?, level: Int, text: String)
     case codeBlock(lines: [String])
+    /// `alignments.count == header.count`; every row in `rows` is padded/truncated to that same
+    /// width by the parser, so a renderer never has to guard against ragged input. A cell left
+    /// empty (GFM's usual "same as the row above" authoring convention) stays an empty string
+    /// here — there's no real colspan/rowspan concept to model, GFM tables don't have one either.
+    case table(header: [String], alignments: [TableAlignment], rows: [[String]])
 
-    // Phase 2+: `.table`, `.callout`, `.image` land here as they're implemented — every
-    // existing renderer only needs a new `case` arm added, not a rewrite, same reasoning
+    // Phase 3+: `.callout`, `.image` land here as they're implemented — every existing renderer
+    // only needs a new `case` arm added, not a rewrite, same reasoning
     // `DocumentFormatConverters.all` in the 137 app uses for output formats.
 }
 
@@ -40,7 +50,12 @@ public enum DocumentParser {
             codeLines = []
         }
 
-        for rawLine in lines {
+        // Index-based rather than `for rawLine in lines` — a table block needs to look ahead
+        // at the delimiter row before committing to "this is a table" and then consume however
+        // many body rows follow, which a single-line-at-a-time loop can't express.
+        var index = 0
+        while index < lines.count {
+            let rawLine = lines[index]
             let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
 
             if trimmed.hasPrefix("```") {
@@ -48,27 +63,51 @@ public enum DocumentParser {
                     flushCodeBlock()
                 }
                 isCodeBlockOpen.toggle()
+                index += 1
                 continue
             }
             if isCodeBlockOpen {
                 codeLines.append(rawLine)
+                index += 1
                 continue
             }
             if trimmed.isEmpty {
+                index += 1
                 continue
             }
 
             if let heading = parseHeading(trimmed) {
                 blocks.append(heading)
+                index += 1
+                continue
+            }
+
+            if trimmed.contains("|"), index + 1 < lines.count,
+                let alignments = parseDelimiterRow(lines[index + 1])
+            {
+                let header = parseTableRow(trimmed)
+                var rowIndex = index + 2
+                var rows: [[String]] = []
+                while rowIndex < lines.count {
+                    let rowLine = lines[rowIndex]
+                    let rowTrimmed = rowLine.trimmingCharacters(in: .whitespaces)
+                    guard !rowTrimmed.isEmpty, rowTrimmed.contains("|") else { break }
+                    rows.append(normalizedRow(parseTableRow(rowTrimmed), toWidth: header.count))
+                    rowIndex += 1
+                }
+                blocks.append(.table(header: normalizedRow(header, toWidth: header.count), alignments: alignments, rows: rows))
+                index = rowIndex
                 continue
             }
 
             if let listItem = parseListLine(rawLine) {
                 blocks.append(listItem)
+                index += 1
                 continue
             }
 
             blocks.append(.paragraph(text: trimmed))
+            index += 1
         }
         flushCodeBlock()
         return blocks
@@ -113,5 +152,57 @@ public enum DocumentParser {
         }
 
         return nil
+    }
+
+    // MARK: - Tables
+
+    /// Splits a `| a | b |` (leading/trailing pipes optional, GFM allows both) row on
+    /// unescaped `|`, trimming whitespace and un-escaping `\|` back to a literal pipe.
+    private static func parseTableRow(_ line: String) -> [String] {
+        var cells: [String] = []
+        var current = ""
+        var previousWasBackslash = false
+        var body = line.trimmingCharacters(in: .whitespaces)
+        if body.hasPrefix("|") { body.removeFirst() }
+        if body.hasSuffix("|") { body.removeLast() }
+
+        for character in body {
+            if character == "|" && !previousWasBackslash {
+                cells.append(current.trimmingCharacters(in: .whitespaces))
+                current = ""
+            } else {
+                current.append(character)
+            }
+            previousWasBackslash = (character == "\\") && !previousWasBackslash
+        }
+        cells.append(current.trimmingCharacters(in: .whitespaces))
+        return cells.map { $0.replacingOccurrences(of: "\\|", with: "|") }
+    }
+
+    /// `nil` when `line` isn't a valid delimiter row at all — the caller uses that to decide
+    /// "this wasn't actually a table", not just "this table has no alignment hints".
+    private static func parseDelimiterRow(_ line: String) -> [TableAlignment]? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.contains("-") else { return nil }
+        let cells = parseTableRow(trimmed)
+        guard !cells.isEmpty else { return nil }
+
+        var alignments: [TableAlignment] = []
+        for cell in cells {
+            guard cell.range(of: "^:?-+:?$", options: .regularExpression) != nil else { return nil }
+            switch (cell.hasPrefix(":"), cell.hasSuffix(":")) {
+            case (true, true): alignments.append(.center)
+            case (true, false): alignments.append(.left)
+            case (false, true): alignments.append(.right)
+            case (false, false): alignments.append(.none)
+            }
+        }
+        return alignments
+    }
+
+    private static func normalizedRow(_ row: [String], toWidth width: Int) -> [String] {
+        if row.count == width { return row }
+        if row.count > width { return Array(row.prefix(width)) }
+        return row + Array(repeating: "", count: width - row.count)
     }
 }

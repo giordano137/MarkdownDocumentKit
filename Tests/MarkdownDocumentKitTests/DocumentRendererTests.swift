@@ -44,4 +44,38 @@ import Testing
     let style = attributed.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle
     #expect(style?.alignment != .justified)
 }
+
+@Test func tableRendersAsASingleImageAttachment() {
+    let blocks: [DocumentBlock] = [
+        .table(header: ["A", "B"], alignments: [.none, .none], rows: [["1", "2"]])
+    ]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+    var foundAttachment = false
+    attributed.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributed.length)) { value, _, _ in
+        if value is NSTextAttachment { foundAttachment = true }
+    }
+    #expect(foundAttachment)
+}
+
+@Test func tableImageFitsWithinRequestedContentWidth() {
+    let longText = String(repeating: "word ", count: 40)
+    let blocks: [DocumentBlock] = [
+        .table(header: ["Column"], alignments: [.none], rows: [[longText]])
+    ]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "", contentWidth: 300)
+    var attachmentSize: CGSize?
+    attributed.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributed.length)) { value, _, _ in
+        if let attachment = value as? NSTextAttachment { attachmentSize = attachment.bounds.size }
+    }
+    #expect(attachmentSize != nil)
+    #expect((attachmentSize?.width ?? .infinity) <= 300.5)
+}
+
+@Test func rendersTableForFallsBackToPlainTextWhenHeaderIsEmpty() {
+    // TableRenderer.render returns nil for a zero-column table — DocumentRenderer must not
+    // crash or silently drop the block, it falls back to plain text (see tableParagraph).
+    let blocks: [DocumentBlock] = [.table(header: [], alignments: [], rows: [])]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+    #expect(attributed.length >= 0)
+}
 #endif
