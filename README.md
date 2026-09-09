@@ -56,22 +56,35 @@ export, replacing the app's own former `MarkdownDocumentRenderer`).
       not implemented yet, model doesn't block it).
 - [x] Phase 2: table layout — column widths (measured, then scaled to fit),
       wrapped row heights, borders, header shading, alignment, inline
-      Markdown per cell. Rendered to a bitmap image and embedded as a single
-      `NSTextAttachment` (`TableRenderer`) — the same "can't flow as text,
-      draw it and embed the image" approach `InlineMathImageRenderer` uses
-      for formulas in the 137 app's chat view. The PDF-pagination side of
-      that trick (a bare `NSTextAttachment` gets neither layout space nor
-      its image drawn from raw `CTFramesetter`/`CTFrameDraw` — both need a
-      `CTRunDelegate` and a manual post-`CTFrameDraw` draw pass) lives in the
-      137 app's own `PDFRenderer`, not in this package, since it's specific
-      to *that* PDF pagination method, not to documents/tables in general.
+      Markdown per cell (`TableRenderer.computeLayout`/`TableLayout`).
+      Two ways to render that layout: a bitmap image (`TableRenderer.render`,
+      the DOCX-facing fallback — DOCX export doesn't know about tables
+      specifically, so it just gets a picture of one via a plain
+      `NSTextAttachment`), and drawing it for real (`TableRenderer.drawTable`,
+      real per-cell text via CGContext text-showing operators, not pixels).
+      `TableAttachment` (an `NSTextAttachment` subclass) carries both — the
+      raw table data + layout for a consumer that knows what to do with it,
+      and the fallback bitmap for one that doesn't. The 137 app's
+      `PDFRenderer` recognizes `TableAttachment` specifically and calls
+      `drawTable` directly on the PDF page's content stream, confirmed (via
+      PDFKit's own text-extraction layer in a test) to produce genuinely
+      selectable/searchable table text — not the DOCX path's embedded
+      picture. That recognition step lives in the app, not here, since it's
+      specific to *that* PDF pagination method (raw `CTFramesetter`/
+      `CTFrameDraw`, which needs a `CTRunDelegate` to reserve the right
+      layout space for any attachment at all — see `PDFRenderer` for why).
 - [ ] Phase 3: callout boxes (`> [!NOTE]` / `[!TIP]` / `[!WARNING]` /
       `[!IMPORTANT]`) as tinted, icon-labeled rounded boxes.
 - [ ] Phase 4: `FormulaRenderer`/`DiagramRenderer` injection points + inline
       and block placement (baseline alignment, sizing).
-- [ ] Phase 5: PDF export (CoreText pagination) and DOCX export
-      (`NSAttributedString` → Office Open XML) from the same laid-out
-      document model, so the two stay visually consistent by construction.
+- [x] Phase 5 (partially — PDF/DOCX export itself is done via the app
+      integration above): PDF and DOCX no longer share one identical
+      rendering of every block — tables specifically diverge on purpose now
+      (real text vs. a fallback picture, since DOCX has no equivalent of
+      drawing text directly into arbitrary page coordinates the way a raw
+      CoreText PDF page allows). Still shared: everything Phase 1 covers.
+      Still open: rounded table corners + centering, and giving DOCX a real
+      (not image) table too via `NSTextTable`/`NSTextTableBlock`.
 
 ## Requirements
 
