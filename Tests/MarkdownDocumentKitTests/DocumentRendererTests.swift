@@ -71,6 +71,24 @@ import Testing
     #expect((attachmentSize?.width ?? .infinity) <= 300.5)
 }
 
+@Test func tableAttachmentCarriesRawDataForRealTextDrawing() {
+    // `PDFRenderer` in the 137 app needs the original header/alignments/rows (not just a
+    // picture) to draw real, selectable text instead of embedding the fallback bitmap —
+    // regression coverage for that data actually surviving the trip through `tableParagraph`.
+    let blocks: [DocumentBlock] = [
+        .table(header: ["A", "B"], alignments: [.left, .right], rows: [["1", "2"]])
+    ]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+    var found: TableAttachment?
+    attributed.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributed.length)) { value, _, _ in
+        if let table = value as? TableAttachment { found = table }
+    }
+    #expect(found?.header == ["A", "B"])
+    #expect(found?.alignments == [.left, .right])
+    #expect(found?.rows == [["1", "2"]])
+    #expect(found?.layout.columnWidths.count == 2)
+}
+
 @Test func rendersTableForFallsBackToPlainTextWhenHeaderIsEmpty() {
     // TableRenderer.render returns nil for a zero-column table — DocumentRenderer must not
     // crash or silently drop the block, it falls back to plain text (see tableParagraph).

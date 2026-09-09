@@ -119,17 +119,20 @@ public enum DocumentRenderer {
 
     // MARK: - Tables
 
-    /// Renders the table to an image (see `TableRenderer`) and wraps it as a single
-    /// `NSTextAttachment` on its own line — same "can't flow as text, so embed as an image"
-    /// approach the 137 app's `InlineMathImageRenderer` uses for formulas, just block-level
-    /// (full paragraph width, top-aligned) instead of inline/baseline-aligned.
+    /// Wraps the table as a single `TableAttachment` on its own line — carries the raw table
+    /// data + computed layout (not just a picture), so a consumer that knows what to do with it
+    /// (the 137 app's `PDFRenderer`) can draw real, selectable text instead of embedding the
+    /// attachment's fallback bitmap image the way a generic consumer (DOCX export) does. Same
+    /// "can't flow as text, needs its own attachment" placement as `InlineMathImageRenderer`
+    /// formulas use in the 137 app's chat view, just block-level (full paragraph width,
+    /// top-aligned) instead of inline/baseline-aligned.
     private static func tableParagraph(
         header: [String],
         alignments: [TableAlignment],
         rows: [[String]],
         contentWidth: CGFloat
     ) -> NSAttributedString {
-        guard let rendered = TableRenderer.render(header: header, alignments: alignments, rows: rows, maxWidth: contentWidth)
+        guard let attachment = TableAttachment(header: header, alignments: alignments, rows: rows, maxWidth: contentWidth)
         else {
             // Falls back to a plain-text rendering of the table rather than silently dropping
             // it — mirrors the 137 app's inline-math fallback for a formula SwiftMath can't
@@ -137,10 +140,6 @@ public enum DocumentRenderer {
             let plain = ([header] + rows).map { $0.joined(separator: " | ") }.joined(separator: "\n")
             return codeParagraph(plain.components(separatedBy: "\n"))
         }
-
-        let attachment = NSTextAttachment()
-        attachment.image = rendered.image
-        attachment.bounds = CGRect(origin: .zero, size: rendered.size)
 
         let result = NSMutableAttributedString(attributedString: NSAttributedString(attachment: attachment))
         result.append(NSAttributedString(string: "\n"))

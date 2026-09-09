@@ -1,50 +1,62 @@
 // TableRenderer
 //
-// Draws a `.table` block into a bitmap image, which `DocumentRenderer` then embeds as a single
-// `NSTextAttachment` — the same "render the thing that can't flow as text, embed it as an
-// image" trick `InlineMathImageRenderer` uses in the 137 app for formulas. Not a limitation
-// worked around here: CoreText/NSAttributedString have no grid-layout primitive at all, a table
-// genuinely has to be drawn, not flowed.
+// Computes a `.table` block's layout (column widths, row heights, styled per-cell content) and
+// can draw it to a bitmap image — used as the DOCX-facing fallback (`render`, embedded as a
+// plain image attachment there) and by anyone who just wants a table as a picture.
 //
-// Rendering to an image rather than real inline flow also means PDF and DOCX export (both just
-// embed whatever `NSTextAttachment`s the shared `NSAttributedString` carries) get an identical
-// table for free, instead of two separate table-drawing implementations that could drift apart.
+// The PDF path does *not* use the bitmap: real, selectable/searchable table text needs the
+// cells actually drawn as text in the PDF's own content stream, not flattened to pixels first
+// (a `CGImage` has no concept of "this pixel used to be a letter"). `computeLayout` is the
+// piece that split out for that — same column-width/row-height math, but returning the styled
+// `NSAttributedString`s and geometry for a caller (the 137 app's `PDFRenderer`) to draw for
+// real, instead of only ever handing back a finished image. See `TableAttachment`.
 
 #if os(macOS)
 import AppKit
 import Foundation
 
+/// Everything needed to draw a table for real: styled (aligned, bold/italic-preserving) cell
+/// content plus the geometry `computeLayout` settled on. `headerCells`/`bodyCells` are already
+/// run through the same inline-Markdown-then-style pass `DocumentRenderer`'s own paragraphs use.
+public struct TableLayout {
+    public let columnWidths: [CGFloat]
+    public let headerHeight: CGFloat
+    public let rowHeights: [CGFloat]
+    public let totalSize: CGSize
+    public let headerCells: [NSAttributedString]
+    public let bodyCells: [[NSAttributedString]]
+}
+
 public enum TableRenderer {
-    private static let cellFont = NSFont.systemFont(ofSize: 12)
-    private static let headerFont = NSFont.boldSystemFont(ofSize: 12)
-    private static let horizontalPadding: CGFloat = 8
-    private static let verticalPadding: CGFloat = 5
-    private static let minRowHeight: CGFloat = 22
-    private static let minColumnWidth: CGFloat = 36
-    private static let borderColor = NSColor(white: 0.75, alpha: 1)
-    private static let headerBackground = NSColor(white: 0.91, alpha: 1)
+    public static let cellFont = NSFont.systemFont(ofSize: 12)
+    public static let headerFont = NSFont.boldSystemFont(ofSize: 12)
+    public static let horizontalPadding: CGFloat = 8
+    public static let verticalPadding: CGFloat = 5
+    public static let minRowHeight: CGFloat = 22
+    public static let minColumnWidth: CGFloat = 36
+    public static let borderColor = NSColor(white: 0.75, alpha: 1)
+    public static let headerBackground = NSColor(white: 0.91, alpha: 1)
     private static let bitmapScale: CGFloat = 2  // crisp at typical PDF/print viewing sizes
 
     /// `maxWidth` is the available content width (e.g. a page's width minus margins) the table
     /// must fit inside — columns are measured at their natural width first, then scaled down
-    /// proportionally only if that natural total would overflow it. Returns `nil` only if the
-    /// bitmap itself couldn't be allocated (never for "the table didn't fit" — it always fits,
-    /// just narrower).
-    public static func render(
+    /// proportionally only if that natural total would overflow it. Returns `nil` only for a
+    /// zero-column table (never for "didn't fit" — it always fits, just narrower).
+    public static func computeLayout(
         header: [String],
         alignments: [TableAlignment],
         rows: [[String]],
         maxWidth: CGFloat
-    ) -> (image: NSImage, size: CGSize)? {
+    ) -> TableLayout? {
         let columnCount = header.count
         guard columnCount > 0 else { return nil }
 
-        let headerCells = header.map { cellAttributedString($0, font: headerFont, alignment: .none) }
-        let bodyCellGrid = rows.map { row in row.map { cellAttributedString($0, font: cellFont, alignment: .none) } }
+        let measuringHeaderCells = header.map { cellAttributedString($0, font: headerFont, alignment: .none) }
+        let measuringBodyGrid = rows.map { row in row.map { cellAttributedString($0, font: cellFont, alignment: .none) } }
 
         var columnWidths = (0..<columnCount).map { column -> CGFloat in
-            var natural = headerCells[column].size().width
-            for row in bodyCellGrid {
+            var natural = measuringHeaderCells[column].size().width
+            for row in measuringBodyGrid {
                 natural = max(natural, row[column].size().width)
             }
             return max(natural + horizontalPadding * 2, minColumnWidth)
@@ -68,28 +80,50 @@ public enum TableRenderer {
             return max(tallest + verticalPadding * 2, minRowHeight)
         }
 
-        // Re-applies each column's real alignment now that column widths (and therefore
+        // Re-styled with each column's real alignment now that column widths (and therefore
         // whether a cell's paragraph style should be left/center/right) are settled — the
         // measuring pass above used `.none` because alignment doesn't affect natural size.
-        let alignedHeaderCells = header.enumerated().map { column, text in
+        let headerCells = header.enumerated().map { column, text in
             cellAttributedString(text, font: headerFont, alignment: alignments[column])
         }
-        let alignedBodyGrid = rows.map { row in
+        let bodyCells = rows.map { row in
             row.enumerated().map { column, text in
                 cellAttributedString(text, font: cellFont, alignment: alignments[column])
             }
         }
 
-        let headerHeight = rowHeight(alignedHeaderCells)
-        let bodyHeights = alignedBodyGrid.map(rowHeight)
-        let totalWidth = columnWidths.reduce(0, +)
-        let totalHeight = headerHeight + bodyHeights.reduce(0, +)
+        let headerHeight = rowHeight(headerCells)
+        let rowHeights = bodyCells.map(rowHeight)
+        let totalSize = CGSize(width: columnWidths.reduce(0, +), height: headerHeight + rowHeights.reduce(0, +))
+
+        return TableLayout(
+            columnWidths: columnWidths,
+            headerHeight: headerHeight,
+            rowHeights: rowHeights,
+            totalSize: totalSize,
+            headerCells: headerCells,
+            bodyCells: bodyCells
+        )
+    }
+
+    /// Bitmap fallback — used for DOCX embedding (a plain image attachment there, see
+    /// `TableAttachment`) and by any consumer that just wants a picture of the table. Draws the
+    /// exact same `computeLayout` geometry `drawTable(_:in:origin:)` draws for real, just onto
+    /// an offscreen bitmap instead of a live PDF context.
+    public static func render(
+        header: [String],
+        alignments: [TableAlignment],
+        rows: [[String]],
+        maxWidth: CGFloat
+    ) -> (image: NSImage, size: CGSize)? {
+        guard let layout = computeLayout(header: header, alignments: alignments, rows: rows, maxWidth: maxWidth)
+        else { return nil }
 
         guard
             let rep = NSBitmapImageRep(
                 bitmapDataPlanes: nil,
-                pixelsWide: Int(totalWidth * bitmapScale),
-                pixelsHigh: Int(totalHeight * bitmapScale),
+                pixelsWide: Int(layout.totalSize.width * bitmapScale),
+                pixelsHigh: Int(layout.totalSize.height * bitmapScale),
                 bitsPerSample: 8,
                 samplesPerPixel: 4,
                 hasAlpha: true,
@@ -99,8 +133,7 @@ public enum TableRenderer {
                 bitsPerPixel: 0
             )
         else { return nil }
-        let pointSize = CGSize(width: totalWidth, height: totalHeight)
-        rep.size = pointSize
+        rep.size = layout.totalSize
 
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
@@ -108,46 +141,59 @@ public enum TableRenderer {
         NSGraphicsContext.current = context
         // No manual `scaleBy` here — `NSGraphicsContext(bitmapImageRep:)` already maps its
         // drawing coordinate space to `rep.size` (the point size set above) regardless of the
-        // rep's actual pixel dimensions, so the `bitmapScale`-many extra pixels we allocated
-        // for Retina crispness are already accounted for automatically. Scaling again on top of
-        // that halved (in each axis) the space our drawing calls actually had to work with —
-        // everything past the resulting midpoint landed outside the pixel buffer and never
-        // made it into the image at all, which read as "top and right of the table missing"
-        // rather than as a scaling artifact.
+        // rep's actual pixel dimensions, so the `bitmapScale`-many extra pixels allocated for
+        // Retina crispness are already accounted for automatically. Scaling again on top of that
+        // halved (in each axis) the space drawing calls actually had to work with — everything
+        // past the resulting midpoint landed outside the pixel buffer and never made it into the
+        // image, which read as "top and right of the table missing" rather than a scale bug.
+        drawTable(layout, in: context.cgContext, origin: .zero)
 
-        // Top-down drawing in a *non-flipped* context (origin bottom-left, the default for a
-        // freshly created bitmap context): track the top edge of the row about to be drawn and
-        // subtract, rather than accumulate from y=0, so row 0 (the header) ends up visually on
-        // top without needing a flipped coordinate space.
-        var rowTop = totalHeight
+        let image = NSImage(size: layout.totalSize)
+        image.addRepresentation(rep)
+        return (image, layout.totalSize)
+    }
+
+    /// Draws borders, header shading, and every cell's real text directly into `context` at
+    /// `origin` (bottom-left of the table, same non-flipped bottom-left-origin convention as a
+    /// fresh bitmap context or a PDF page) — the piece that makes PDF export's table text
+    /// genuinely selectable: `context` here is the PDF page's own content stream, so this ends
+    /// up as real text-showing operators, not a flattened image.
+    public static func drawTable(_ layout: TableLayout, in context: CGContext, origin: CGPoint) {
+        let nsContext = NSGraphicsContext(cgContext: context, flipped: false)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = nsContext
+        defer { NSGraphicsContext.restoreGraphicsState() }
+
+        // Top-down drawing: track the top edge of the row about to be drawn and subtract, rather
+        // than accumulate from y=0, so row 0 (the header) ends up visually on top without
+        // needing a flipped coordinate space.
+        var rowTop = origin.y + layout.totalSize.height
         drawRow(
-            cells: alignedHeaderCells,
-            columnWidths: columnWidths,
+            cells: layout.headerCells,
+            columnWidths: layout.columnWidths,
+            originX: origin.x,
             top: rowTop,
-            height: headerHeight,
+            height: layout.headerHeight,
             background: headerBackground
         )
-        rowTop -= headerHeight
-        for (rowIndex, cells) in alignedBodyGrid.enumerated() {
-            let height = bodyHeights[rowIndex]
-            drawRow(cells: cells, columnWidths: columnWidths, top: rowTop, height: height, background: nil)
+        rowTop -= layout.headerHeight
+        for (rowIndex, cells) in layout.bodyCells.enumerated() {
+            let height = layout.rowHeights[rowIndex]
+            drawRow(cells: cells, columnWidths: layout.columnWidths, originX: origin.x, top: rowTop, height: height, background: nil)
             rowTop -= height
         }
-        drawGrid(columnWidths: columnWidths, rowHeights: [headerHeight] + bodyHeights, totalSize: pointSize)
-
-        let image = NSImage(size: pointSize)
-        image.addRepresentation(rep)
-        return (image, pointSize)
+        drawGrid(layout, origin: origin)
     }
 
     private static func drawRow(
         cells: [NSAttributedString],
         columnWidths: [CGFloat],
+        originX: CGFloat,
         top: CGFloat,
         height: CGFloat,
         background: NSColor?
     ) {
-        var x: CGFloat = 0
+        var x: CGFloat = originX
         for (column, cell) in cells.enumerated() {
             let width = columnWidths[column]
             let cellRect = CGRect(x: x, y: top - height, width: width, height: height)
@@ -161,27 +207,28 @@ public enum TableRenderer {
         }
     }
 
-    private static func drawGrid(columnWidths: [CGFloat], rowHeights: [CGFloat], totalSize: CGSize) {
+    private static func drawGrid(_ layout: TableLayout, origin: CGPoint) {
         borderColor.setStroke()
         let path = NSBezierPath()
         path.lineWidth = 1
+        let rowHeights = [layout.headerHeight] + layout.rowHeights
 
-        var y: CGFloat = totalSize.height
-        path.move(to: CGPoint(x: 0, y: y))
-        path.line(to: CGPoint(x: totalSize.width, y: y))
+        var y: CGFloat = origin.y + layout.totalSize.height
+        path.move(to: CGPoint(x: origin.x, y: y))
+        path.line(to: CGPoint(x: origin.x + layout.totalSize.width, y: y))
         for height in rowHeights {
             y -= height
-            path.move(to: CGPoint(x: 0, y: y))
-            path.line(to: CGPoint(x: totalSize.width, y: y))
+            path.move(to: CGPoint(x: origin.x, y: y))
+            path.line(to: CGPoint(x: origin.x + layout.totalSize.width, y: y))
         }
 
-        var x: CGFloat = 0
-        path.move(to: CGPoint(x: x, y: 0))
-        path.line(to: CGPoint(x: x, y: totalSize.height))
-        for width in columnWidths {
+        var x: CGFloat = origin.x
+        path.move(to: CGPoint(x: x, y: origin.y))
+        path.line(to: CGPoint(x: x, y: origin.y + layout.totalSize.height))
+        for width in layout.columnWidths {
             x += width
-            path.move(to: CGPoint(x: x, y: 0))
-            path.line(to: CGPoint(x: x, y: totalSize.height))
+            path.move(to: CGPoint(x: x, y: origin.y))
+            path.line(to: CGPoint(x: x, y: origin.y + layout.totalSize.height))
         }
         path.stroke()
     }
