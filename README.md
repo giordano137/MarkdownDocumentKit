@@ -46,14 +46,25 @@ optional capability rather than a hard dependency.
 
 ## Status
 
-Phase 1 done; not wired into the 137 app yet.
+Phases 1–2 done and wired into the 137 app (`DocumentFormatConverters.swift`
+uses this package's `DocumentRenderer`/`DocumentParser` for its PDF/DOCX
+export, replacing the app's own former `MarkdownDocumentRenderer`).
 
 - [x] Phase 1: block layout core — headings, paragraphs (justified,
       hyphenated), lists, fenced code blocks. `DocumentBlock`/`DocumentParser`
       (platform-agnostic) + `DocumentRenderer` (macOS/AppKit; UIKit renderer
       not implemented yet, model doesn't block it).
-- [ ] Phase 2: table layout — column widths, row heights, cell borders/
-      padding, per-cell text wrapping.
+- [x] Phase 2: table layout — column widths (measured, then scaled to fit),
+      wrapped row heights, borders, header shading, alignment, inline
+      Markdown per cell. Rendered to a bitmap image and embedded as a single
+      `NSTextAttachment` (`TableRenderer`) — the same "can't flow as text,
+      draw it and embed the image" approach `InlineMathImageRenderer` uses
+      for formulas in the 137 app's chat view. The PDF-pagination side of
+      that trick (a bare `NSTextAttachment` gets neither layout space nor
+      its image drawn from raw `CTFramesetter`/`CTFrameDraw` — both need a
+      `CTRunDelegate` and a manual post-`CTFrameDraw` draw pass) lives in the
+      137 app's own `PDFRenderer`, not in this package, since it's specific
+      to *that* PDF pagination method, not to documents/tables in general.
 - [ ] Phase 3: callout boxes (`> [!NOTE]` / `[!TIP]` / `[!WARNING]` /
       `[!IMPORTANT]`) as tinted, icon-labeled rounded boxes.
 - [ ] Phase 4: `FormulaRenderer`/`DiagramRenderer` injection points + inline
