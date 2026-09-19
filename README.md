@@ -73,10 +73,28 @@ export, replacing the app's own former `MarkdownDocumentRenderer`).
       specific to *that* PDF pagination method (raw `CTFramesetter`/
       `CTFrameDraw`, which needs a `CTRunDelegate` to reserve the right
       layout space for any attachment at all — see `PDFRenderer` for why).
-- [ ] Phase 3: callout boxes (`> [!NOTE]` / `[!TIP]` / `[!WARNING]` /
-      `[!IMPORTANT]`) as tinted, icon-labeled rounded boxes.
-- [ ] Phase 4: `FormulaRenderer`/`DiagramRenderer` injection points + inline
-      and block placement (baseline alignment, sizing).
+- [x] Blockquotes (`> ...`): indented/italic/muted paragraph, joining
+      consecutive `>` lines into one block.
+- [ ] Phase 3 (remaining): `[!NOTE]`/`[!TIP]`/`[!WARNING]`/`[!IMPORTANT]`
+      callouts as tinted, icon-labeled rounded boxes (a blockquote already
+      renders; the tinted/iconed box styling on top doesn't exist yet).
+- [x] Phase 4 (formulas): `FormulaRenderer` injection point, implemented in
+      the 137 app via `SwiftMathFormulaRenderer`
+      (`DocumentFormatConverters.swift`) on top of the same SwiftMath call
+      the chat view's `InlineMathImageRenderer` uses. `\[...\]`/`$$...$$` on
+      their own line (or as their own fenced multi-line block) become a
+      `.formula` block, rendered as its own centered equation image;
+      `$...$`/`\(...\)`/a stray `\[...\]`/`$$...$$` mid-sentence are
+      extracted from a paragraph/list-item/blockquote/heading's text and
+      rendered as an inline, baseline-aligned image so they keep flowing
+      with surrounding prose instead of breaking the paragraph — the same
+      class of inline-flow problem the 137 chat view's own math rendering
+      hit and fixed, sidestepped here by design (nothing is ever lifted
+      onto its own line) rather than patched after the fact. No renderer
+      supplied, or one that can't parse a given LaTeX string, falls back to
+      the raw source text, never a blank gap. `DiagramRenderer` (Mermaid)
+      is not started — no native Swift port of Mermaid exists, so it would
+      need to delegate to a small JS context, unlike everything else here.
 - [x] Phase 5 (partially — PDF/DOCX export itself is done via the app
       integration above): PDF and DOCX no longer share one identical
       rendering of every block — tables specifically diverge on purpose now
