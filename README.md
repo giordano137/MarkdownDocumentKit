@@ -46,9 +46,11 @@ optional capability rather than a hard dependency.
 
 ## Status
 
-Phases 1–2 done and wired into the 137 app (`DocumentFormatConverters.swift`
-uses this package's `DocumentRenderer`/`DocumentParser` for its PDF/DOCX
-export, replacing the app's own former `MarkdownDocumentRenderer`).
+Phases 1, 2, 4, and 5 done; wired into the 137 app
+(`DocumentFormatConverters.swift` uses this package's `DocumentParser`/
+`DocumentRenderer`/`PDFRenderer` for its PDF/DOCX export, replacing the
+app's own former `MarkdownDocumentRenderer` and, more recently, its own
+copy of the PDF-pagination logic that now lives here instead).
 
 - [x] Phase 1: block layout core — headings, paragraphs (justified,
       hyphenated), lists, fenced code blocks. `DocumentBlock`/`DocumentParser`
@@ -64,15 +66,12 @@ export, replacing the app's own former `MarkdownDocumentRenderer`).
       real per-cell text via CGContext text-showing operators, not pixels).
       `TableAttachment` (an `NSTextAttachment` subclass) carries both — the
       raw table data + layout for a consumer that knows what to do with it,
-      and the fallback bitmap for one that doesn't. The 137 app's
-      `PDFRenderer` recognizes `TableAttachment` specifically and calls
-      `drawTable` directly on the PDF page's content stream, confirmed (via
-      PDFKit's own text-extraction layer in a test) to produce genuinely
+      and the fallback bitmap for one that doesn't. `PDFRenderer` (below)
+      recognizes `TableAttachment` specifically and calls `drawTable`
+      directly on the PDF page's content stream, confirmed (via PDFKit's
+      own text-extraction layer in a test) to produce genuinely
       selectable/searchable table text — not the DOCX path's embedded
-      picture. That recognition step lives in the app, not here, since it's
-      specific to *that* PDF pagination method (raw `CTFramesetter`/
-      `CTFrameDraw`, which needs a `CTRunDelegate` to reserve the right
-      layout space for any attachment at all — see `PDFRenderer` for why).
+      picture.
 - [x] Blockquotes (`> ...`): indented/italic/muted paragraph, joining
       consecutive `>` lines into one block.
 - [ ] Phase 3 (remaining): `[!NOTE]`/`[!TIP]`/`[!WARNING]`/`[!IMPORTANT]`
@@ -95,14 +94,31 @@ export, replacing the app's own former `MarkdownDocumentRenderer`).
       the raw source text, never a blank gap. `DiagramRenderer` (Mermaid)
       is not started — no native Swift port of Mermaid exists, so it would
       need to delegate to a small JS context, unlike everything else here.
-- [x] Phase 5 (partially — PDF/DOCX export itself is done via the app
-      integration above): PDF and DOCX no longer share one identical
-      rendering of every block — tables specifically diverge on purpose now
-      (real text vs. a fallback picture, since DOCX has no equivalent of
-      drawing text directly into arbitrary page coordinates the way a raw
-      CoreText PDF page allows). Still shared: everything Phase 1 covers.
-      Still open: rounded table corners + centering, and giving DOCX a real
-      (not image) table too via `NSTextTable`/`NSTextTableBlock`.
+- [x] Phase 5: `PDFRenderer` — paginates a `DocumentRenderer`-produced
+      `NSAttributedString` into a real multi-page PDF via raw CoreText
+      (`CTFramesetter`/`CTFrameDraw`), no `NSPrintOperation` round trip, no
+      dependency. Originally lived in the 137 app's own
+      `DocumentFormatConverters.swift` (a consumer reimplementing this
+      package's own stated job); moved in here so "renders to PDF" is true
+      of the package itself, not just of one particular consumer. Needs a
+      `CTRunDelegate` per `.attachment` run to make raw CoreText reserve
+      real layout space for a table/formula image at all (bare
+      `.attachment` sizing is silently ignored by `CTFramesetter`/
+      `CTFrameDraw`) and to draw that image by hand afterward (`CTFrameDraw`
+      only ever draws glyphs) — and needs `CTFrameGetLineOrigins`' values
+      offset by the page margin by hand, since they're relative to the
+      frame's own path bounding box, not already-absolute page coordinates
+      (confirmed two real bugs from getting this wrong only by opening an
+      actual generated PDF: an attachment's descent under-reported as
+      always 0 made it overlap the next line, and the missing margin
+      offset drew every table/formula flush with the page's left edge).
+      PDF and DOCX no longer share one identical rendering of every block —
+      tables specifically diverge on purpose (real text vs. a fallback
+      picture, since DOCX has no equivalent of drawing text directly into
+      arbitrary page coordinates the way a raw CoreText PDF page allows).
+      Still shared: everything Phase 1 covers. Still open: rounded table
+      corners + centering, and giving DOCX a real (not image) table too via
+      `NSTextTable`/`NSTextTableBlock`.
 
 ## Requirements
 
