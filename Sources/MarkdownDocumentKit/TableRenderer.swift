@@ -8,8 +8,8 @@
 // cells actually drawn as text in the PDF's own content stream, not flattened to pixels first
 // (a `CGImage` has no concept of "this pixel used to be a letter"). `computeLayout` is the
 // piece that split out for that — same column-width/row-height math, but returning the styled
-// `NSAttributedString`s and geometry for a caller (the 137 app's `PDFRenderer`) to draw for
-// real, instead of only ever handing back a finished image. See `TableAttachment`.
+// `NSAttributedString`s and geometry for `PDFRenderer` to draw for real, instead of only ever
+// handing back a finished image. See `TableAttachment`.
 
 #if os(macOS)
 import AppKit
@@ -249,8 +249,8 @@ public enum TableRenderer {
         }
         mutable.addAttribute(.paragraphStyle, value: style, range: fullRange)
         // Fixed black, not the dynamic `.textColor` — this text gets drawn straight into a raw
-        // `CGContext`/PDF content stream (`drawTable`, called by 137's `PDFRenderer` outside any
-        // live window), where a dynamic semantic color can resolve to something else entirely; in
+        // `CGContext`/PDF content stream (`drawTable`, called by `PDFRenderer` outside any live
+        // window), where a dynamic semantic color can resolve to something else entirely; in
         // practice it resolved to a color barely distinguishable from the page background,
         // confirmed by opening an actual generated PDF, not just by a passing unit test (a text
         // color attribute existing and a color being visible are different assertions). Matches

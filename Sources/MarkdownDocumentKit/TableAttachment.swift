@@ -3,11 +3,9 @@
 // An `NSTextAttachment` subclass that carries a table's raw data and computed `TableLayout`
 // alongside the usual bitmap `image` — the bitmap is there so a consumer that only knows about
 // plain attachments (DOCX's officeOpenXML writer, today) still gets a correct picture of the
-// table, but a consumer that recognizes this specific subclass (the 137 app's `PDFRenderer`)
-// can instead draw the table for real: actual selectable/searchable text in the PDF's content
-// stream, not pixels. See `TableRenderer.drawTable` for that path, and README's Phase 2 note on
-// why this distinction is PDF-pagination-specific rather than something this package resolves
-// on its own.
+// table, but `PDFRenderer` (which recognizes this specific subclass) can instead draw the table
+// for real: actual selectable/searchable text in the PDF's content stream, not pixels. See
+// `TableRenderer.drawTable` for that path.
 
 #if os(macOS)
 import AppKit

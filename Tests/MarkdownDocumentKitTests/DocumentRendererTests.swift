@@ -84,9 +84,9 @@ private struct MockFormulaRenderer: FormulaRenderer {
 }
 
 @Test func codeBlockCarriesBackgroundColorForShading() {
-    // DOCX picks this attribute up for free via AppKit's OOXML writer; the 137 app's
-    // PDFRenderer paints it manually (CTFrameDraw ignores it) — this only guards that the
-    // attribute itself is actually present on the code block's text, not either renderer.
+    // DOCX picks this attribute up for free via AppKit's OOXML writer; `PDFRenderer` paints it
+    // manually (CTFrameDraw ignores it) — this only guards that the attribute itself is actually
+    // present on the code block's text, not either renderer.
     let blocks: [DocumentBlock] = [.codeBlock(lines: ["let x = 1"])]
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
     let range = (attributed.string as NSString).range(of: "let x = 1")
@@ -151,9 +151,9 @@ private struct MockFormulaRenderer: FormulaRenderer {
 }
 
 @Test func tableAttachmentCarriesRawDataForRealTextDrawing() {
-    // `PDFRenderer` in the 137 app needs the original header/alignments/rows (not just a
-    // picture) to draw real, selectable text instead of embedding the fallback bitmap —
-    // regression coverage for that data actually surviving the trip through `tableParagraph`.
+    // `PDFRenderer` needs the original header/alignments/rows (not just a picture) to draw real,
+    // selectable text instead of embedding the fallback bitmap — regression coverage for that
+    // data actually surviving the trip through `tableParagraph`.
     let blocks: [DocumentBlock] = [
         .table(header: ["A", "B"], alignments: [.left, .right], rows: [["1", "2"]])
     ]

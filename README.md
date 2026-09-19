@@ -22,11 +22,10 @@ routes to get there both cost more than the problem is actually worth:
   a bounded, well-known set of block-level constructs.
 
 MarkdownDocumentKit takes the same middle path
-[TeXEnvironments](https://github.com/mgriebling/SwiftMath) took for
-formulas: implement the specific handful of constructs that matter
-(tables, callouts, headings/lists, images) as real layout code on top of
-CoreText/CoreGraphics, instead of reaching for something built to handle
-*any* document.
+[TeXEnvironments](../TeXEnvironments) takes for formulas: implement the
+specific handful of constructs that matter (tables, callouts,
+headings/lists, images) as real layout code on top of CoreText/CoreGraphics,
+instead of reaching for something built to handle *any* document.
 
 ## Math rendering is injected, not bundled
 
@@ -46,11 +45,9 @@ optional capability rather than a hard dependency.
 
 ## Status
 
-Phases 1, 2, 4, and 5 done; wired into the 137 app
-(`DocumentFormatConverters.swift` uses this package's `DocumentParser`/
-`DocumentRenderer`/`PDFRenderer` for its PDF/DOCX export, replacing the
-app's own former `MarkdownDocumentRenderer` and, more recently, its own
-copy of the PDF-pagination logic that now lives here instead).
+Phases 1, 2, 4, and 5 done and in real production use by a consuming app's
+document-export feature (parse → render → paginate to PDF/DOCX, no glue
+code needed beyond a `FormulaRenderer` implementation for math).
 
 - [x] Phase 1: block layout core — headings, paragraphs (justified,
       hyphenated), lists, fenced code blocks. `DocumentBlock`/`DocumentParser`
@@ -77,31 +74,28 @@ copy of the PDF-pagination logic that now lives here instead).
 - [ ] Phase 3 (remaining): `[!NOTE]`/`[!TIP]`/`[!WARNING]`/`[!IMPORTANT]`
       callouts as tinted, icon-labeled rounded boxes (a blockquote already
       renders; the tinted/iconed box styling on top doesn't exist yet).
-- [x] Phase 4 (formulas): `FormulaRenderer` injection point, implemented in
-      the 137 app via `SwiftMathFormulaRenderer`
-      (`DocumentFormatConverters.swift`) on top of the same SwiftMath call
-      the chat view's `InlineMathImageRenderer` uses. `\[...\]`/`$$...$$` on
-      their own line (or as their own fenced multi-line block) become a
-      `.formula` block, rendered as its own centered equation image;
-      `$...$`/`\(...\)`/a stray `\[...\]`/`$$...$$` mid-sentence are
-      extracted from a paragraph/list-item/blockquote/heading's text and
-      rendered as an inline, baseline-aligned image so they keep flowing
-      with surrounding prose instead of breaking the paragraph — the same
-      class of inline-flow problem the 137 chat view's own math rendering
-      hit and fixed, sidestepped here by design (nothing is ever lifted
-      onto its own line) rather than patched after the fact. No renderer
-      supplied, or one that can't parse a given LaTeX string, falls back to
-      the raw source text, never a blank gap. `DiagramRenderer` (Mermaid)
-      is not started — no native Swift port of Mermaid exists, so it would
-      need to delegate to a small JS context, unlike everything else here.
+- [x] Phase 4 (formulas): `FormulaRenderer` injection point — a consumer
+      implements it on top of its own SwiftMath (or similar) call.
+      `\[...\]`/`$$...$$` on their own line (or as their own fenced
+      multi-line block) become a `.formula` block, rendered as its own
+      centered equation image; `$...$`/`\(...\)`/a stray `\[...\]`/
+      `$$...$$` mid-sentence are extracted from a paragraph/list-item/
+      blockquote/heading's text and rendered as an inline, baseline-aligned
+      image so they keep flowing with surrounding prose instead of breaking
+      the paragraph — a formula is never lifted onto its own line to make
+      room for it, sidestepping a related-but-different bug class that
+      approach invites (a `**`/`*` Markdown pair that used to sit tight
+      around the formula ending up split across the new line break and no
+      longer recognized as a pair). No renderer supplied, or one that can't
+      parse a given LaTeX string, falls back to the raw source text, never
+      a blank gap. `DiagramRenderer` (Mermaid) is not started — no native
+      Swift port of Mermaid exists, so it would need to delegate to a small
+      JS context, unlike everything else here.
 - [x] Phase 5: `PDFRenderer` — paginates a `DocumentRenderer`-produced
       `NSAttributedString` into a real multi-page PDF via raw CoreText
       (`CTFramesetter`/`CTFrameDraw`), no `NSPrintOperation` round trip, no
-      dependency. Originally lived in the 137 app's own
-      `DocumentFormatConverters.swift` (a consumer reimplementing this
-      package's own stated job); moved in here so "renders to PDF" is true
-      of the package itself, not just of one particular consumer. Needs a
-      `CTRunDelegate` per `.attachment` run to make raw CoreText reserve
+      dependency. Needs a `CTRunDelegate` per `.attachment` run to make raw
+      CoreText reserve
       real layout space for a table/formula image at all (bare
       `.attachment` sizing is silently ignored by `CTFramesetter`/
       `CTFrameDraw`) and to draw that image by hand afterward (`CTFrameDraw`

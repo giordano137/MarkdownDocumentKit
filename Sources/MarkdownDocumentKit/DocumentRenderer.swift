@@ -5,10 +5,9 @@
 // stay pure Foundation so a future UIKit renderer is an additive file, not a rewrite of the
 // model underneath it.
 //
-// Two things this improves over the 137 app's original `MarkdownDocumentRenderer` (which this
-// supersedes — see the app-side integration): paragraphs are justified and hyphenated rather
-// than ragged-right, and inline formatting goes through the same `NSAttributedString(markdown:)`
-// pass consistently across every block type instead of only some.
+// Two things this improves over a naive Markdown-to-NSAttributedString pass: paragraphs are
+// justified and hyphenated rather than ragged-right, and inline formatting goes through the same
+// `NSAttributedString(markdown:)` pass consistently across every block type instead of only some.
 
 #if os(macOS)
 import AppKit
@@ -18,7 +17,7 @@ public enum DocumentRenderer {
     /// US Letter (612pt wide) minus `PDFRenderer`'s own 54pt margins on each side — tables need
     /// to know the eventual page's content width up front, since (unlike text) they're rasterized
     /// once at a fixed pixel size rather than reflowed at layout time. Override if a consumer
-    /// renders to a different page size/margins than the 137 app's PDF export does.
+    /// renders to a different page size/margins than `PDFRenderer`'s own defaults.
     public static let defaultContentWidth: CGFloat = 504
 
     public static func attributedString(
@@ -166,11 +165,10 @@ public enum DocumentRenderer {
     // MARK: - Tables
 
     /// Wraps the table as a single `TableAttachment` on its own line — carries the raw table
-    /// data + computed layout (not just a picture), so a consumer that knows what to do with it
-    /// (the 137 app's `PDFRenderer`) can draw real, selectable text instead of embedding the
-    /// attachment's fallback bitmap image the way a generic consumer (DOCX export) does. Same
-    /// "can't flow as text, needs its own attachment" placement as `InlineMathImageRenderer`
-    /// formulas use in the 137 app's chat view, just block-level (full paragraph width,
+    /// data + computed layout (not just a picture), so `PDFRenderer` can draw real, selectable
+    /// text instead of embedding the attachment's fallback bitmap image the way a generic
+    /// consumer (DOCX export) does. Same "can't flow as text, needs its own attachment" placement
+    /// as an inline formula's rendered image, just block-level (full paragraph width,
     /// top-aligned) instead of inline/baseline-aligned.
     private static func tableParagraph(
         header: [String],
@@ -181,8 +179,8 @@ public enum DocumentRenderer {
         guard let attachment = TableAttachment(header: header, alignments: alignments, rows: rows, maxWidth: contentWidth)
         else {
             // Falls back to a plain-text rendering of the table rather than silently dropping
-            // it — mirrors the 137 app's inline-math fallback for a formula SwiftMath can't
-            // parse (show the raw source, don't just disappear).
+            // it — mirrors the fallback for a formula that can't be rendered (show the raw
+            // source, don't just disappear).
             let plain = ([header] + rows).map { $0.joined(separator: " | ") }.joined(separator: "\n")
             return codeParagraph(plain.components(separatedBy: "\n"))
         }
@@ -204,20 +202,21 @@ public enum DocumentRenderer {
     // MARK: - Shared inline-Markdown + paragraph-style paragraph builder
 
     /// Runs `text` through `NSAttributedString(markdown:)` for inline `**bold**`/`*italic*`/
-    /// links first (that call only ever parses inline runs, never block structure — same
-    /// limitation noted in the 137 app's `MessageContentView`), then layers the block-level
-    /// font/indent/spacing/justification on top, since inline Markdown parsing doesn't touch
-    /// any of those.
+    /// links first (that call only ever parses inline runs, never block structure), then layers
+    /// the block-level font/indent/spacing/justification on top, since inline Markdown parsing
+    /// doesn't touch any of those.
     ///
     /// Inline math (`$...$`/`\(...\)`/a stray `$$...$$` not on its own line) is pulled out
     /// *before* the Markdown pass via `extractInlineFormulas` — not just so it can be replaced
     /// with a rendered image afterward, but because leaving raw LaTeX in place would let its own
     /// syntax get misread as Markdown (`$a_b$`'s underscore, `$x*y$`'s asterisk) by the very same
-    /// parser. The 137 app's chat renderer hit a related but different bug from *not* doing this
-    /// carefully — see `137-inline-math-rendering-gap` — this sidesteps that whole class of
-    /// problem by never lifting a formula onto its own line in the first place (which is what
-    /// caused a `**`/`*` pair to end up split across lines there); everything here stays inline,
-    /// on one line, from source text through to the final attributed string.
+    /// parser. A hand-rolled chat-message renderer that instead lifts a matched formula onto its
+    /// own line (a natural first instinct — it's the simplest way to give it room) risks a
+    /// related but different bug: a `**`/`*` markdown pair that used to sit tight around the
+    /// formula ends up split across the new line break and no longer recognized as a pair. This
+    /// sidesteps that whole class of problem by never lifting a formula onto its own line in the
+    /// first place; everything here stays inline, on one line, from source text through to the
+    /// final attributed string.
     private static func inlineParagraph(
         _ text: String,
         baseFont: NSFont,
@@ -266,10 +265,7 @@ public enum DocumentRenderer {
 
     /// Sentinel pair from the Unicode Private Use Area — guaranteed to carry no Markdown meaning
     /// of its own, so `NSAttributedString(markdown:)` passes a `\u{E000}0\u{E001}` placeholder
-    /// straight through as literal text. Mirrors the sentinel-marker technique 137's own
-    /// `MessageParser`/`MessageContentView` use for the same reason (`AppConstants.inlineMathStartMarker`/
-    /// `inlineMathEndMarker`), reimplemented here rather than shared since this package has zero
-    /// dependencies on the app that consumes it.
+    /// straight through as literal text.
     private static let sentinelStart: Character = "\u{E000}"
     private static let sentinelEnd: Character = "\u{E001}"
 
@@ -278,9 +274,8 @@ public enum DocumentRenderer {
     /// pairs in encounter order (the number inside each placeholder is that pair's index).
     /// `$...$` specifically is skipped (left as literal text) when it looks like plain-prose
     /// dollar signs rather than math — empty, starting with a digit ("$5"), or spanning multiple
-    /// sentences (". ") — the same three guards the 137 chat parser uses, since a document
-    /// generator draws from the same models and hits the same false-positive shapes (e.g. "$5 or
-    /// $10" in one paragraph).
+    /// sentences (". ") — cheap guards against the false-positive shape a document generator
+    /// routinely hits: two currency mentions in one paragraph ("$5 or $10").
     private static func extractInlineFormulas(from text: String) -> (text: String, formulas: [(latex: String, displayMode: Bool)]) {
         var formulas: [(latex: String, displayMode: Bool)] = []
         var result = text
@@ -369,7 +364,7 @@ public enum DocumentRenderer {
     /// surrounding word's baseline instead of its top) or sits flush with `y: 0` (false — a
     /// standalone `.formula` block has no surrounding text to align with, and this keeps its
     /// whole height reported as ascent, same convention `TableAttachment.bounds` already uses).
-    /// Not just cosmetic: a raw-CoreText PDF page's own `CTRunDelegate` (see 137's `PDFRenderer`)
+    /// Not just cosmetic: a raw-CoreText PDF page's own `CTRunDelegate` (see `PDFRenderer`)
     /// derives the run's ascent/descent split straight from this rect, so getting it wrong for a
     /// block formula previously under/over-reserved line height and made it visibly overlap the
     /// paragraph drawn right after it — caught by opening an actual generated PDF, not by a

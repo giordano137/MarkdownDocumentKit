@@ -36,8 +36,7 @@ public enum DocumentBlock: Equatable {
     case formula(latex: String)
 
     // Phase 3+: `.callout`, `.image` land here as they're implemented — every existing renderer
-    // only needs a new `case` arm added, not a rewrite, same reasoning
-    // `DocumentFormatConverters.all` in the 137 app uses for output formats.
+    // only needs a new `case` arm added, not a rewrite.
 }
 
 /// Turns Markdown source into `[DocumentBlock]`. Line-oriented, not a full CommonMark
@@ -150,10 +149,10 @@ public enum DocumentParser {
         return .heading(level: level, text: text)
     }
 
-    /// Leading-whitespace-based nesting (2 spaces per level, tabs counted as 2 spaces) — the
-    /// same convention `MessageParser.parseListLine` uses in the 137 app, reimplemented here
-    /// rather than shared, since this package has zero dependencies (see README/Package.swift)
-    /// and pulling in the app's own parser would mean depending on the app, backwards.
+    /// Leading-whitespace-based nesting (2 spaces per level, tabs counted as 2 spaces) — a plain,
+    /// self-contained implementation, since this package has zero dependencies (see
+    /// README/Package.swift) and pulling in a consumer app's own list parser would mean depending
+    /// on the app, backwards.
     private static func parseListLine(_ rawLine: String) -> DocumentBlock? {
         var indent = 0
         var index = rawLine.startIndex
@@ -234,10 +233,9 @@ public enum DocumentParser {
 
     /// Recognizes a `\[...\]`/`$$...$$` display equation, either written on one line
     /// (`\[E = mc^2\]`) or as its own fenced block spanning several lines (opening `\[`/`$$` alone
-    /// on a line, content, then a matching closing `\]`/`$$` alone on a line — the same convention
-    /// the 137 app's own `MessageParser` uses for `.formulaBlock`). Advances `index` itself (like
-    /// the table branch above, which also consumes a variable number of lines) and returns `nil`
-    /// without touching `index` if `trimmed` isn't a formula opener at all.
+    /// on a line, content, then a matching closing `\]`/`$$` alone on a line). Advances `index`
+    /// itself (like the table branch above, which also consumes a variable number of lines) and
+    /// returns `nil` without touching `index` if `trimmed` isn't a formula opener at all.
     private static func parseDisplayFormula(_ trimmed: String, lines: [String], index: inout Int) -> DocumentBlock? {
         if let range = trimmed.range(of: "^\\\\\\[(.*)\\\\\\]$", options: .regularExpression) {
             let inner = trimmed[range]

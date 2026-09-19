@@ -3,10 +3,10 @@
 // Consumer-supplied hook for turning LaTeX into an image — this package has zero
 // math-typesetting dependencies (see README's "Math rendering is injected, not bundled"), so a
 // `.formula` block or an inline `$...$`/`\(...\)` span only renders as real math when the
-// consumer supplies one (typically backed by SwiftMath, e.g. via 137's
-// InlineMathImageRenderer/TeXEnvironments). Without one, DocumentRenderer falls back to showing
-// the formula's raw LaTeX source as plain text — same "show the source, don't just disappear"
-// philosophy TableRenderer already uses when a table can't be laid out.
+// consumer supplies one (typically backed by SwiftMath, e.g. via TeXEnvironments). Without one,
+// DocumentRenderer falls back to showing the formula's raw LaTeX source as plain text — same
+// "show the source, don't just disappear" philosophy TableRenderer already uses when a table
+// can't be laid out.
 
 #if os(macOS)
 import AppKit
@@ -21,8 +21,8 @@ public protocol FormulaRenderer {
 
 /// An image plus its baseline offset. The offset matters only for an inline formula: it needs to
 /// sit on the same baseline as the surrounding text rather than hang from the top of the line —
-/// same reasoning as 137's own `InlineMathImageRenderer.Rendered`, which this mirrors so that
-/// type's `render(...)` result can be wrapped into one of these directly.
+/// a consumer's own SwiftMath-backed rasterizer typically already computes this (the descent of
+/// the rendered `MTMathUILabel`), so this type just carries it across the protocol boundary.
 public struct FormulaImage {
     public let image: NSImage
     public let descent: CGFloat
