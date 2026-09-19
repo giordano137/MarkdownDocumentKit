@@ -45,6 +45,54 @@ import Testing
     )
 }
 
+@Test func parsesBlockquoteStrippingMarker() {
+    let blocks = DocumentParser.parse("> A quoted line.")
+    #expect(blocks == [.blockquote(text: "A quoted line.")])
+}
+
+@Test func joinsConsecutiveBlockquoteLinesIntoOneBlock() {
+    let blocks = DocumentParser.parse("> Line one.\n> Line two.")
+    #expect(blocks == [.blockquote(text: "Line one. Line two.")])
+}
+
+@Test func blockquoteWithPipeIsNotMistakenForATable() {
+    // A quoted line containing "|" (or a quoted table row) must stay a blockquote, not get
+    // reinterpreted by the table branch just because it contains a pipe character.
+    let blocks = DocumentParser.parse("> Speed | Velocity, same thing.\nNext paragraph.")
+    #expect(
+        blocks == [
+            .blockquote(text: "Speed | Velocity, same thing."),
+            .paragraph(text: "Next paragraph."),
+        ]
+    )
+}
+
+@Test func parsesSingleLineDisplayFormula() {
+    let blocks = DocumentParser.parse("\\[E = mc^2\\]")
+    #expect(blocks == [.formula(latex: "E = mc^2")])
+}
+
+@Test func parsesSingleLineDollarDollarFormula() {
+    let blocks = DocumentParser.parse("$$E = mc^2$$")
+    #expect(blocks == [.formula(latex: "E = mc^2")])
+}
+
+@Test func parsesFencedMultiLineDisplayFormula() {
+    let markdown = "\\[\nx = 1 \\\\\ny = 2\n\\]"
+    let blocks = DocumentParser.parse(markdown)
+    #expect(blocks == [.formula(latex: "x = 1 \\\\\ny = 2")])
+}
+
+@Test func formulaContainingPipeIsNotMistakenForATable() {
+    let blocks = DocumentParser.parse("\\[|x| = 1\\]\nNext paragraph.")
+    #expect(
+        blocks == [
+            .formula(latex: "|x| = 1"),
+            .paragraph(text: "Next paragraph."),
+        ]
+    )
+}
+
 @Test func parsesFencedCodeBlockAsOneBlock() {
     let markdown = "```\nlet x = 1\nprint(x)\n```"
     let blocks = DocumentParser.parse(markdown)

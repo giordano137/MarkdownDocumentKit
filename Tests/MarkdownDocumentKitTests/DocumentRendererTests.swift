@@ -3,6 +3,63 @@ import AppKit
 import Testing
 @testable import MarkdownDocumentKit
 
+/// Deterministic 1x1 image per call so tests can assert an attachment was actually produced,
+/// without depending on any real math-typesetting engine (this package has none — see README).
+private struct MockFormulaRenderer: FormulaRenderer {
+    var shouldFail: Bool = false
+
+    func image(forLaTeX latex: String, displayMode: Bool, fontSize: CGFloat) -> FormulaImage? {
+        guard !shouldFail else { return nil }
+        let image = NSImage(size: NSSize(width: 10, height: 10))
+        return FormulaImage(image: image, descent: 2)
+    }
+}
+
+@Test func displayFormulaRendersAsAttachmentWhenRendererSupplied() {
+    let blocks: [DocumentBlock] = [.formula(latex: "E = mc^2")]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "", formulaRenderer: MockFormulaRenderer())
+    var foundAttachment = false
+    attributed.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributed.length)) { value, _, _ in
+        if value is NSTextAttachment { foundAttachment = true }
+    }
+    #expect(foundAttachment)
+    #expect(!attributed.string.contains("E = mc^2"))
+}
+
+@Test func displayFormulaFallsBackToRawSourceWithoutRenderer() {
+    let blocks: [DocumentBlock] = [.formula(latex: "E = mc^2")]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+    #expect(attributed.string.contains("E = mc^2"))
+}
+
+@Test func inlineDollarFormulaFlowsWithSurroundingParagraphText() {
+    let blocks: [DocumentBlock] = [.paragraph(text: "The energy is $E = mc^2$ per Einstein.")]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "", formulaRenderer: MockFormulaRenderer())
+    #expect(attributed.string.contains("The energy is"))
+    #expect(attributed.string.contains("per Einstein."))
+    var foundAttachment = false
+    attributed.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributed.length)) { value, _, _ in
+        if value is NSTextAttachment { foundAttachment = true }
+    }
+    #expect(foundAttachment)
+}
+
+@Test func inlineDollarSignsThatLookLikeCurrencyAreNotTreatedAsMath() {
+    let blocks: [DocumentBlock] = [.paragraph(text: "It costs $5 or $10 depending on size.")]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "", formulaRenderer: MockFormulaRenderer())
+    #expect(attributed.string.contains("$5 or $10"))
+}
+
+@Test func inlineFormulaFallsBackToRawSourceWhenRendererFailsToParse() {
+    let blocks: [DocumentBlock] = [.paragraph(text: "Symbol $W$ here.")]
+    let attributed = DocumentRenderer.attributedString(
+        from: blocks,
+        title: "",
+        formulaRenderer: MockFormulaRenderer(shouldFail: true)
+    )
+    #expect(attributed.string.contains("$W$"))
+}
+
 @Test func rendersTitleAndHeadingText() {
     let blocks: [DocumentBlock] = [.heading(level: 1, text: "Section"), .paragraph(text: "Body.")]
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "My Document")
@@ -24,6 +81,28 @@ import Testing
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
     #expect(attributed.string.contains("let x = 1"))
     #expect(attributed.string.contains("print(x)"))
+}
+
+@Test func codeBlockCarriesBackgroundColorForShading() {
+    // DOCX picks this attribute up for free via AppKit's OOXML writer; the 137 app's
+    // PDFRenderer paints it manually (CTFrameDraw ignores it) — this only guards that the
+    // attribute itself is actually present on the code block's text, not either renderer.
+    let blocks: [DocumentBlock] = [.codeBlock(lines: ["let x = 1"])]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+    let range = (attributed.string as NSString).range(of: "let x = 1")
+    let background = attributed.attribute(.backgroundColor, at: range.location, effectiveRange: nil) as? NSColor
+    #expect(background == DocumentRenderer.codeBlockBackground)
+}
+
+@Test func rendersBlockquoteTextItalicizedAndIndented() {
+    let blocks: [DocumentBlock] = [.blockquote(text: "A wise quote.")]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+    #expect(attributed.string.contains("A wise quote."))
+    let range = (attributed.string as NSString).range(of: "A wise quote.")
+    let font = attributed.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+    #expect(font?.fontDescriptor.symbolicTraits.contains(.italic) == true)
+    let style = attributed.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle
+    #expect((style?.headIndent ?? 0) > 0)
 }
 
 @Test func bodyParagraphsAreJustifiedAndHyphenated() {

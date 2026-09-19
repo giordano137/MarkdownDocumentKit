@@ -20,6 +20,7 @@ public enum TableAlignment: Equatable {
 public enum DocumentBlock: Equatable {
     case heading(level: Int, text: String)
     case paragraph(text: String)
+    case blockquote(text: String)
     case listItem(ordered: Bool, number: Int?, level: Int, text: String)
     case codeBlock(lines: [String])
     /// `alignments.count == header.count`; every row in `rows` is padded/truncated to that same
@@ -27,6 +28,12 @@ public enum DocumentBlock: Equatable {
     /// empty (GFM's usual "same as the row above" authoring convention) stays an empty string
     /// here — there's no real colspan/rowspan concept to model, GFM tables don't have one either.
     case table(header: [String], alignments: [TableAlignment], rows: [[String]])
+    /// A standalone display equation — the whole content of a `\[...\]` or `$$...$$` block (own
+    /// line(s), not mixed with surrounding prose). `latex` excludes the delimiters. Inline math
+    /// (`$...$`/`\(...\)` mid-sentence) is *not* a block of its own — see `DocumentRenderer`,
+    /// which extracts it from a `.paragraph`/`.listItem`/`.blockquote`'s text at render time so it
+    /// keeps flowing with the surrounding words instead of breaking the paragraph apart.
+    case formula(latex: String)
 
     // Phase 3+: `.callout`, `.image` land here as they're implemented — every existing renderer
     // only needs a new `case` arm added, not a rewrite, same reasoning
@@ -79,6 +86,29 @@ public enum DocumentParser {
             if let heading = parseHeading(trimmed) {
                 blocks.append(heading)
                 index += 1
+                continue
+            }
+
+            // Checked before the table branch below: a formula containing "|" (e.g. absolute-value
+            // bars, `|x|`) would otherwise risk being mistaken for a table row.
+            if let formula = parseDisplayFormula(trimmed, lines: lines, index: &index) {
+                blocks.append(formula)
+                continue
+            }
+
+            // Checked before the table branch below: a quoted line containing "|" (a quoted
+            // table row, or just a literal pipe) would otherwise risk being mistaken for one.
+            if trimmed.hasPrefix(">") {
+                var quotedLines: [String] = []
+                while index < lines.count {
+                    let quotedTrimmed = lines[index].trimmingCharacters(in: .whitespaces)
+                    guard quotedTrimmed.hasPrefix(">") else { break }
+                    var stripped = String(quotedTrimmed.dropFirst())
+                    if stripped.hasPrefix(" ") { stripped.removeFirst() }
+                    quotedLines.append(stripped)
+                    index += 1
+                }
+                blocks.append(.blockquote(text: quotedLines.joined(separator: " ")))
                 continue
             }
 
@@ -198,6 +228,44 @@ public enum DocumentParser {
             }
         }
         return alignments
+    }
+
+    // MARK: - Display formulas
+
+    /// Recognizes a `\[...\]`/`$$...$$` display equation, either written on one line
+    /// (`\[E = mc^2\]`) or as its own fenced block spanning several lines (opening `\[`/`$$` alone
+    /// on a line, content, then a matching closing `\]`/`$$` alone on a line — the same convention
+    /// the 137 app's own `MessageParser` uses for `.formulaBlock`). Advances `index` itself (like
+    /// the table branch above, which also consumes a variable number of lines) and returns `nil`
+    /// without touching `index` if `trimmed` isn't a formula opener at all.
+    private static func parseDisplayFormula(_ trimmed: String, lines: [String], index: inout Int) -> DocumentBlock? {
+        if let range = trimmed.range(of: "^\\\\\\[(.*)\\\\\\]$", options: .regularExpression) {
+            let inner = trimmed[range]
+            let latex = String(inner.dropFirst(2).dropLast(2))
+            index += 1
+            return .formula(latex: latex)
+        }
+        if let range = trimmed.range(of: "^\\$\\$(.*)\\$\\$$", options: .regularExpression) {
+            let inner = trimmed[range]
+            let latex = String(inner.dropFirst(2).dropLast(2))
+            index += 1
+            return .formula(latex: latex)
+        }
+
+        let opensFencedBlock = trimmed == "\\[" || trimmed == "$$"
+        guard opensFencedBlock else { return nil }
+        let closingMarker = trimmed == "\\[" ? "\\]" : "$$"
+
+        var formulaLines: [String] = []
+        var cursor = index + 1
+        while cursor < lines.count {
+            let candidate = lines[cursor].trimmingCharacters(in: .whitespaces)
+            if candidate == closingMarker { break }
+            formulaLines.append(lines[cursor])
+            cursor += 1
+        }
+        index = min(cursor + 1, lines.count)
+        return .formula(latex: formulaLines.joined(separator: "\n"))
     }
 
     private static func normalizedRow(_ row: [String], toWidth width: Int) -> [String] {

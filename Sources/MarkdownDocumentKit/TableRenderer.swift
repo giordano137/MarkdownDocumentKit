@@ -248,7 +248,15 @@ public enum TableRenderer {
         case .right: style.alignment = .right
         }
         mutable.addAttribute(.paragraphStyle, value: style, range: fullRange)
-        mutable.addAttribute(.foregroundColor, value: NSColor.textColor, range: fullRange)
+        // Fixed black, not the dynamic `.textColor` — this text gets drawn straight into a raw
+        // `CGContext`/PDF content stream (`drawTable`, called by 137's `PDFRenderer` outside any
+        // live window), where a dynamic semantic color can resolve to something else entirely; in
+        // practice it resolved to a color barely distinguishable from the page background,
+        // confirmed by opening an actual generated PDF, not just by a passing unit test (a text
+        // color attribute existing and a color being visible are different assertions). Matches
+        // `DocumentRenderer.codeBlockBackground`'s already-established reasoning for the same
+        // "exported file, no live theme to resolve against" situation.
+        mutable.addAttribute(.foregroundColor, value: NSColor.black, range: fullRange)
 
         mutable.enumerateAttribute(.font, in: fullRange, options: []) { value, range, _ in
             let traits = (value as? NSFont)?.fontDescriptor.symbolicTraits ?? []
