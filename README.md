@@ -43,12 +43,39 @@ context (no native Swift port of Mermaid exists) — that's the one piece
 this package can't avoid delegating out, but it stays an injected,
 optional capability rather than a hard dependency.
 
+## Styling is injected too — bring your own brand
+
+Every color, font size, and spacing value `DocumentRenderer`/`TableRenderer`
+use comes from a `DocumentTheme` — an optional parameter defaulting to
+`.default`, which reproduces this package's original hardcoded look exactly,
+so an existing consumer that never asks for a theme sees zero change:
+
+```swift
+var theme = DocumentTheme.default
+theme.tableBorder = .systemOrange
+theme.codeBlockBackground = .systemPurple
+theme.calloutTints[.warning] = DocumentTheme.CalloutTint(background: .yellow, accent: .brown)
+theme.headingFontSizes = [28, 22, 18, 16, 14, 12]
+
+let attributed = DocumentRenderer.attributedString(from: blocks, title: title, theme: theme)
+```
+
+Overriding one field (or one callout kind) leaves everything else at its
+default — no need to restate the whole theme to change a single color.
+Deliberately *not* stretched to cover font *family*: every text run here is
+a system-font regular/bold/italic/monospaced variant, and letting a
+consumer swap in an arbitrary custom typeface would mean re-deriving
+bold/italic synthesis for that typeface too (a real, separate feature) —
+colors/sizes/spacing are what "our brand instead of yours" concretely means
+in practice, without opening that door.
+
 ## Status
 
-Phases 1 through 5, plus images, done and in real production use by a
-consuming app's document-export feature (parse → render → paginate to
-PDF/DOCX; a `FormulaRenderer` and/or `ImageRenderer` implementation is
-the only glue code a consumer needs to add math/images on top).
+Phases 1 through 5, plus images and theme injection, done and in real
+production use by a consuming app's document-export feature (parse →
+render → paginate to PDF/DOCX; a `FormulaRenderer` and/or `ImageRenderer`
+implementation is the only glue code a consumer needs to add math/images
+on top, and a `DocumentTheme` is entirely optional on top of that).
 
 - [x] Phase 1: block layout core — headings, paragraphs (justified,
       hyphenated), lists, fenced code blocks. `DocumentBlock`/`DocumentParser`
@@ -156,6 +183,12 @@ the only glue code a consumer needs to add math/images on top).
       `ImageRenderer` (this package does no disk/network I/O of its own,
       same reasoning as `FormulaRenderer`). No renderer, or one that
       returns `nil`, falls back to showing the alt text.
+- [x] Theme injection — see "Styling is injected too" above. `DocumentTheme`
+      covers every color/font-size/spacing constant that used to be a
+      `static let`/inline literal across `DocumentRenderer.swift`/
+      `TableRenderer.swift`; `TableLayout` carries its own `theme` so
+      `PDFRenderer` (which never sees a theme directly) still draws a
+      table's borders/header shading in the right colors.
 - [ ] `DiagramRenderer` (Mermaid) — not started, see Phase 4's note above.
 
 ## Requirements
