@@ -173,7 +173,7 @@ private struct MockImageRenderer: ImageRenderer {
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
     let range = (attributed.string as NSString).range(of: "let x = 1")
     let background = attributed.attribute(.backgroundColor, at: range.location, effectiveRange: nil) as? PlatformColor
-    #expect(background == DocumentRenderer.codeBlockBackground)
+    #expect(background == DocumentTheme.default.codeBlockBackground)
 }
 
 @Test func codeBlockTextColorIsFixedNotDynamic() {

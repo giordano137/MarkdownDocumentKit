@@ -21,10 +21,22 @@ public final class TableAttachment: NSTextAttachment {
     public let rows: [[String]]
     public let layout: TableLayout
 
-    public init?(header: [String], alignments: [TableAlignment], rows: [[String]], maxWidth: CGFloat) {
+    public init?(
+        header: [String],
+        alignments: [TableAlignment],
+        rows: [[String]],
+        maxWidth: CGFloat,
+        theme: DocumentTheme = .default
+    ) {
         guard
-            let layout = TableRenderer.computeLayout(header: header, alignments: alignments, rows: rows, maxWidth: maxWidth),
-            let rendered = TableRenderer.render(header: header, alignments: alignments, rows: rows, maxWidth: maxWidth)
+            let layout = TableRenderer.computeLayout(
+                header: header,
+                alignments: alignments,
+                rows: rows,
+                maxWidth: maxWidth,
+                theme: theme
+            ),
+            let rendered = TableRenderer.render(header: header, alignments: alignments, rows: rows, maxWidth: maxWidth, theme: theme)
         else { return nil }
 
         self.header = header

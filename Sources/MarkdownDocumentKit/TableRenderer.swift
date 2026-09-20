@@ -22,6 +22,10 @@
 // system — the same approach `PDFRenderer` already uses for the whole document, extended here to
 // table cells specifically. This also means `drawTable`/`drawRow`/`drawGrid` need no
 // platform-specific branch at all: they're identical on macOS and iOS.
+//
+// Every color/font-size/padding value comes from the `DocumentTheme` passed to `computeLayout` —
+// carried inside the returned `TableLayout` so `drawTable(_:in:origin:)` (called later, often from
+// `PDFRenderer`, which never sees a theme itself) doesn't need it threaded through separately.
 
 #if canImport(AppKit) || canImport(UIKit)
 #if canImport(AppKit)
@@ -42,17 +46,10 @@ public struct TableLayout {
     public let totalSize: CGSize
     public let headerCells: [NSAttributedString]
     public let bodyCells: [[NSAttributedString]]
+    public let theme: DocumentTheme
 }
 
 public enum TableRenderer {
-    public static let cellFont = PlatformFont.systemFont(ofSize: 12)
-    public static let headerFont = PlatformFont.boldSystemFont(ofSize: 12)
-    public static let horizontalPadding: CGFloat = 8
-    public static let verticalPadding: CGFloat = 5
-    public static let minRowHeight: CGFloat = 22
-    public static let minColumnWidth: CGFloat = 36
-    public static let borderColor = PlatformColor(white: 0.75, alpha: 1)
-    public static let headerBackground = PlatformColor(white: 0.91, alpha: 1)
     private static let bitmapScale: CGFloat = 2  // crisp at typical PDF/print viewing sizes
 
     /// `maxWidth` is the available content width (e.g. a page's width minus margins) the table
@@ -63,20 +60,28 @@ public enum TableRenderer {
         header: [String],
         alignments: [TableAlignment],
         rows: [[String]],
-        maxWidth: CGFloat
+        maxWidth: CGFloat,
+        theme: DocumentTheme = .default
     ) -> TableLayout? {
         let columnCount = header.count
         guard columnCount > 0 else { return nil }
 
-        let measuringHeaderCells = header.map { cellAttributedString($0, font: headerFont, alignment: .none) }
-        let measuringBodyGrid = rows.map { row in row.map { cellAttributedString($0, font: cellFont, alignment: .none) } }
+        let headerFont = PlatformFont.boldSystemFont(ofSize: theme.tableHeaderFontSize)
+        let cellFont = PlatformFont.systemFont(ofSize: theme.tableCellFontSize)
+        let horizontalPadding = theme.tableHorizontalPadding
+        let verticalPadding = theme.tableVerticalPadding
+
+        let measuringHeaderCells = header.map { cellAttributedString($0, font: headerFont, alignment: .none, theme: theme) }
+        let measuringBodyGrid = rows.map { row in
+            row.map { cellAttributedString($0, font: cellFont, alignment: .none, theme: theme) }
+        }
 
         var columnWidths = (0..<columnCount).map { column -> CGFloat in
             var natural = measuringHeaderCells[column].size().width
             for row in measuringBodyGrid {
                 natural = max(natural, row[column].size().width)
             }
-            return max(natural + horizontalPadding * 2, minColumnWidth)
+            return max(natural + horizontalPadding * 2, theme.tableMinColumnWidth)
         }
         let naturalTotal = columnWidths.reduce(0, +)
         if naturalTotal > maxWidth {
@@ -99,18 +104,18 @@ public enum TableRenderer {
                 )
                 tallest = max(tallest, bounds.height)
             }
-            return max(tallest + verticalPadding * 2, minRowHeight)
+            return max(tallest + verticalPadding * 2, theme.tableMinRowHeight)
         }
 
         // Re-styled with each column's real alignment now that column widths (and therefore
         // whether a cell's paragraph style should be left/center/right) are settled — the
         // measuring pass above used `.none` because alignment doesn't affect natural size.
         let headerCells = header.enumerated().map { column, text in
-            cellAttributedString(text, font: headerFont, alignment: alignments[column])
+            cellAttributedString(text, font: headerFont, alignment: alignments[column], theme: theme)
         }
         let bodyCells = rows.map { row in
             row.enumerated().map { column, text in
-                cellAttributedString(text, font: cellFont, alignment: alignments[column])
+                cellAttributedString(text, font: cellFont, alignment: alignments[column], theme: theme)
             }
         }
 
@@ -124,7 +129,8 @@ public enum TableRenderer {
             rowHeights: rowHeights,
             totalSize: totalSize,
             headerCells: headerCells,
-            bodyCells: bodyCells
+            bodyCells: bodyCells,
+            theme: theme
         )
     }
 
@@ -136,9 +142,10 @@ public enum TableRenderer {
         header: [String],
         alignments: [TableAlignment],
         rows: [[String]],
-        maxWidth: CGFloat
+        maxWidth: CGFloat,
+        theme: DocumentTheme = .default
     ) -> (image: PlatformImage, size: CGSize)? {
-        guard let layout = computeLayout(header: header, alignments: alignments, rows: rows, maxWidth: maxWidth)
+        guard let layout = computeLayout(header: header, alignments: alignments, rows: rows, maxWidth: maxWidth, theme: theme)
         else { return nil }
 
         return renderToImage(size: layout.totalSize, scale: bitmapScale) { context in
@@ -152,7 +159,9 @@ public enum TableRenderer {
     /// here is the PDF page's own content stream, so this ends up as real text-showing operators,
     /// not a flattened image. `renderToImage` (used by `render` above) pre-flips its own offscreen
     /// context to this same bottom-left convention before calling in here, so this function itself
-    /// never needs to know or care which of the two callers it's being used from.
+    /// never needs to know or care which of the two callers it's being used from. Reads its colors
+    /// from `layout.theme` rather than taking a separate theme parameter, so a caller that only
+    /// has the layout (`PDFRenderer`, via `TableAttachment.layout`) doesn't need one threaded in.
     public static func drawTable(_ layout: TableLayout, in context: CGContext, origin: CGPoint) {
         // Top-down drawing: track the top edge of the row about to be drawn and subtract, rather
         // than accumulate from y=0, so row 0 (the header) ends up visually on top without
@@ -164,7 +173,9 @@ public enum TableRenderer {
             originX: origin.x,
             top: rowTop,
             height: layout.headerHeight,
-            background: headerBackground,
+            background: layout.theme.tableHeaderBackground,
+            horizontalPadding: layout.theme.tableHorizontalPadding,
+            verticalPadding: layout.theme.tableVerticalPadding,
             context: context
         )
         rowTop -= layout.headerHeight
@@ -177,6 +188,8 @@ public enum TableRenderer {
                 top: rowTop,
                 height: height,
                 background: nil,
+                horizontalPadding: layout.theme.tableHorizontalPadding,
+                verticalPadding: layout.theme.tableVerticalPadding,
                 context: context
             )
             rowTop -= height
@@ -191,6 +204,8 @@ public enum TableRenderer {
         top: CGFloat,
         height: CGFloat,
         background: PlatformColor?,
+        horizontalPadding: CGFloat,
+        verticalPadding: CGFloat,
         context: CGContext
     ) {
         var x: CGFloat = originX
@@ -217,7 +232,7 @@ public enum TableRenderer {
     }
 
     private static func drawGrid(_ layout: TableLayout, origin: CGPoint, context: CGContext) {
-        context.setStrokeColor(borderColor.cgColor)
+        context.setStrokeColor(layout.theme.tableBorder.cgColor)
         context.setLineWidth(1)
         let rowHeights = [layout.headerHeight] + layout.rowHeights
 
@@ -244,7 +259,12 @@ public enum TableRenderer {
 
     /// Same inline-Markdown-then-style approach as `DocumentRenderer`'s own paragraphs, so a
     /// **bold** table cell renders bold instead of showing literal asterisks.
-    private static func cellAttributedString(_ text: String, font: PlatformFont, alignment: TableAlignment) -> NSAttributedString {
+    private static func cellAttributedString(
+        _ text: String,
+        font: PlatformFont,
+        alignment: TableAlignment,
+        theme: DocumentTheme
+    ) -> NSAttributedString {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         let inline = (try? NSAttributedString(markdown: text, options: options)) ?? NSAttributedString(string: text)
         let mutable = NSMutableAttributedString(attributedString: inline)
@@ -257,15 +277,15 @@ public enum TableRenderer {
         case .right: style.alignment = .right
         }
         mutable.addAttribute(.paragraphStyle, value: style, range: fullRange)
-        // Fixed black, not a dynamic system color — this text gets drawn straight into a raw
-        // `CGContext`/PDF content stream (`drawTable`, called by `PDFRenderer` outside any live
-        // window), where a dynamic semantic color can resolve to something else entirely; in
-        // practice it resolved to a color barely distinguishable from the page background,
-        // confirmed by opening an actual generated PDF, not just by a passing unit test (a text
-        // color attribute existing and a color being visible are different assertions). Matches
-        // `DocumentRenderer.codeBlockBackground`'s already-established reasoning for the same
-        // "exported file, no live theme to resolve against" situation.
-        mutable.addAttribute(.foregroundColor, value: PlatformColor.black, range: fullRange)
+        // Fixed by default (`theme.tableText`), not a dynamic system color — this text gets
+        // drawn straight into a raw `CGContext`/PDF content stream (`drawTable`, called by
+        // `PDFRenderer` outside any live window), where a dynamic semantic color can resolve to
+        // something else entirely; in practice it resolved to a color barely distinguishable from
+        // the page background, confirmed by opening an actual generated PDF, not just by a
+        // passing unit test (a text color attribute existing and a color being visible are
+        // different assertions). Matches `DocumentRenderer`'s `codeText` theme default, same
+        // "exported file, no live theme to resolve against" reasoning.
+        mutable.addAttribute(.foregroundColor, value: theme.tableText, range: fullRange)
 
         mutable.enumerateAttribute(.font, in: fullRange, options: []) { value, range, _ in
             let resolvedFont = applyingPreservedBoldItalic(from: value as? PlatformFont, to: font)

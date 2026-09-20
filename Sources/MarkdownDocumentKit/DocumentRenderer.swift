@@ -7,6 +7,10 @@
 // here is one shared implementation. `DocumentBlock`/`DocumentParser` stay pure Foundation with no
 // gating at all, needed by neither platform's UI frameworks.
 //
+// Every color/font-size/spacing value used below comes from a `DocumentTheme` (default:
+// `.default`, reproducing this package's original hardcoded look exactly) — see that file for why
+// font *family* stays out of scope.
+//
 // Two things this improves over a naive Markdown-to-NSAttributedString pass: paragraphs are
 // justified and hyphenated rather than ragged-right, and inline formatting goes through the same
 // `NSAttributedString(markdown:)` pass consistently across every block type instead of only some.
@@ -30,41 +34,46 @@ public enum DocumentRenderer {
         from blocks: [DocumentBlock],
         title: String,
         contentWidth: CGFloat = defaultContentWidth,
+        theme: DocumentTheme = .default,
         formulaRenderer: FormulaRenderer? = nil,
         imageRenderer: ImageRenderer? = nil
     ) -> NSAttributedString {
         let result = NSMutableAttributedString()
-        result.append(styledTitle(title))
+        result.append(styledTitle(title, theme: theme))
 
         for block in blocks {
             switch block {
             case .heading(let level, let text):
-                result.append(headingParagraph(text, level: level, formulaRenderer: formulaRenderer))
+                result.append(headingParagraph(text, level: level, theme: theme, formulaRenderer: formulaRenderer))
 
             case .paragraph(let text):
-                result.append(bodyParagraph(text, formulaRenderer: formulaRenderer))
+                result.append(bodyParagraph(text, theme: theme, formulaRenderer: formulaRenderer))
 
             case .blockquote(let text):
-                result.append(blockquoteParagraph(text, formulaRenderer: formulaRenderer))
+                result.append(blockquoteParagraph(text, theme: theme, formulaRenderer: formulaRenderer))
 
             case .callout(let kind, let text):
-                result.append(calloutParagraph(kind: kind, text: text, formulaRenderer: formulaRenderer))
+                result.append(calloutParagraph(kind: kind, text: text, theme: theme, formulaRenderer: formulaRenderer))
 
             case .listItem(let ordered, let number, let level, let text):
                 let bullet = ordered ? "\(number ?? 1).  " : "\(bulletCharacter(forLevel: level))  "
-                result.append(listParagraph(bullet + text, level: level, formulaRenderer: formulaRenderer))
+                result.append(listParagraph(bullet + text, level: level, theme: theme, formulaRenderer: formulaRenderer))
 
             case .codeBlock(let lines):
-                result.append(codeParagraph(lines))
+                result.append(codeParagraph(lines, theme: theme))
 
             case .table(let header, let alignments, let rows):
-                result.append(tableParagraph(header: header, alignments: alignments, rows: rows, contentWidth: contentWidth))
+                result.append(
+                    tableParagraph(header: header, alignments: alignments, rows: rows, contentWidth: contentWidth, theme: theme)
+                )
 
             case .formula(let latex):
-                result.append(formulaParagraph(latex: latex, formulaRenderer: formulaRenderer))
+                result.append(formulaParagraph(latex: latex, theme: theme, formulaRenderer: formulaRenderer))
 
             case .image(let altText, let source):
-                result.append(imageParagraph(altText: altText, source: source, contentWidth: contentWidth, imageRenderer: imageRenderer))
+                result.append(
+                    imageParagraph(altText: altText, source: source, contentWidth: contentWidth, theme: theme, imageRenderer: imageRenderer)
+                )
             }
         }
         return result
@@ -72,26 +81,30 @@ public enum DocumentRenderer {
 
     // MARK: - Title
 
-    private static func styledTitle(_ text: String) -> NSAttributedString {
+    private static func styledTitle(_ text: String, theme: DocumentTheme) -> NSAttributedString {
         let style = NSMutableParagraphStyle()
-        style.paragraphSpacing = 16
+        style.paragraphSpacing = theme.titleSpacing
         return NSAttributedString(
             string: text + "\n",
-            attributes: [.font: PlatformFont.boldSystemFont(ofSize: 22), .paragraphStyle: style]
+            attributes: [.font: PlatformFont.boldSystemFont(ofSize: theme.titleFontSize), .paragraphStyle: style]
         )
     }
 
     // MARK: - Headings
 
-    private static let headingSizeByLevel: [CGFloat] = [20, 18, 16, 14, 13, 12]
-
-    private static func headingParagraph(_ text: String, level: Int, formulaRenderer: FormulaRenderer?) -> NSAttributedString {
-        let size = headingSizeByLevel[min(max(level - 1, 0), headingSizeByLevel.count - 1)]
+    private static func headingParagraph(
+        _ text: String,
+        level: Int,
+        theme: DocumentTheme,
+        formulaRenderer: FormulaRenderer?
+    ) -> NSAttributedString {
+        let sizes = theme.headingFontSizes
+        let size = sizes[min(max(level - 1, 0), sizes.count - 1)]
         return inlineParagraph(
             text,
             baseFont: .boldSystemFont(ofSize: size),
             indent: 0,
-            spacingAfter: 10,
+            spacingAfter: theme.headingSpacing,
             justified: false,
             formulaRenderer: formulaRenderer
         )
@@ -103,12 +116,12 @@ public enum DocumentRenderer {
     /// replaces, and most of what separates "looks like a printed page" from "looks like a
     /// text file". Headings/list items stay ragged-right on purpose: justifying short lines
     /// produces ugly, uneven word-spacing that full paragraphs don't suffer from.
-    private static func bodyParagraph(_ text: String, formulaRenderer: FormulaRenderer?) -> NSAttributedString {
+    private static func bodyParagraph(_ text: String, theme: DocumentTheme, formulaRenderer: FormulaRenderer?) -> NSAttributedString {
         inlineParagraph(
             text,
-            baseFont: .systemFont(ofSize: 13),
+            baseFont: .systemFont(ofSize: theme.bodyFontSize),
             indent: 0,
-            spacingAfter: 8,
+            spacingAfter: theme.bodySpacing,
             justified: true,
             formulaRenderer: formulaRenderer
         )
@@ -120,38 +133,26 @@ public enum DocumentRenderer {
     /// border bar isn't representable through `NSParagraphStyle` alone the way a browser's CSS
     /// `border-left` is, and isn't worth a custom `NSTextAttachment`/manual-draw detour for a
     /// document converter that never had blockquote support at all before this.
-    private static func blockquoteParagraph(_ text: String, formulaRenderer: FormulaRenderer?) -> NSAttributedString {
+    private static func blockquoteParagraph(
+        _ text: String,
+        theme: DocumentTheme,
+        formulaRenderer: FormulaRenderer?
+    ) -> NSAttributedString {
         let result = inlineParagraph(
             text,
-            baseFont: italicSystemFont(ofSize: 13),
-            indent: 18,
-            spacingAfter: 8,
+            baseFont: italicSystemFont(ofSize: theme.bodyFontSize),
+            indent: theme.indentUnit,
+            spacingAfter: theme.bodySpacing,
             justified: false,
             formulaRenderer: formulaRenderer
         )
         let mutable = NSMutableAttributedString(attributedString: result)
         let fullRange = NSRange(location: 0, length: mutable.length)
-        mutable.addAttribute(.foregroundColor, value: PlatformColor.documentSecondaryText, range: fullRange)
+        mutable.addAttribute(.foregroundColor, value: theme.secondaryText, range: fullRange)
         return mutable
     }
 
     // MARK: - Callouts
-
-    /// Fixed light tint + a matching darker accent for the label text, per GFM alert kind — fixed
-    /// rather than dynamic for the same reason `codeBlockBackground` already is (an exported file
-    /// has no live theme to resolve dynamic colors against).
-    private static func calloutTint(for kind: CalloutKind) -> (background: PlatformColor, accent: PlatformColor) {
-        switch kind {
-        case .note:
-            return (PlatformColor(red: 0.90, green: 0.95, blue: 1.0, alpha: 1), PlatformColor(red: 0.16, green: 0.40, blue: 0.85, alpha: 1))
-        case .tip:
-            return (PlatformColor(red: 0.89, green: 0.97, blue: 0.90, alpha: 1), PlatformColor(red: 0.16, green: 0.55, blue: 0.28, alpha: 1))
-        case .warning:
-            return (PlatformColor(red: 1.0, green: 0.95, blue: 0.82, alpha: 1), PlatformColor(red: 0.70, green: 0.48, blue: 0.05, alpha: 1))
-        case .important:
-            return (PlatformColor(red: 0.95, green: 0.90, blue: 1.0, alpha: 1), PlatformColor(red: 0.50, green: 0.20, blue: 0.75, alpha: 1))
-        }
-    }
 
     /// A GFM alert (`> [!NOTE]` etc.): a bold, accent-colored label line, then the body text
     /// tinted via a `.backgroundColor` attribute — the same mechanism `codeBlockBackground`
@@ -164,20 +165,25 @@ public enum DocumentRenderer {
     /// either: an emoji/symbol character risks rendering oddly through `PDFRenderer`'s raw
     /// CoreText text-showing operators, which color-glyph fonts don't always cooperate with, so a
     /// plain text label is the robust choice.
-    private static func calloutParagraph(kind: CalloutKind, text: String, formulaRenderer: FormulaRenderer?) -> NSAttributedString {
-        let (background, accent) = calloutTint(for: kind)
+    private static func calloutParagraph(
+        kind: CalloutKind,
+        text: String,
+        theme: DocumentTheme,
+        formulaRenderer: FormulaRenderer?
+    ) -> NSAttributedString {
+        let tint = theme.calloutTint(for: kind)
         let result = NSMutableAttributedString()
 
         let labelStyle = NSMutableParagraphStyle()
-        labelStyle.firstLineHeadIndent = 18
-        labelStyle.headIndent = 18
-        labelStyle.paragraphSpacing = 2
+        labelStyle.firstLineHeadIndent = theme.indentUnit
+        labelStyle.headIndent = theme.indentUnit
+        labelStyle.paragraphSpacing = theme.calloutLabelSpacing
         result.append(
             NSAttributedString(
                 string: kind.rawValue + "\n",
                 attributes: [
-                    .font: PlatformFont.boldSystemFont(ofSize: 13),
-                    .foregroundColor: accent,
+                    .font: PlatformFont.boldSystemFont(ofSize: theme.calloutLabelFontSize),
+                    .foregroundColor: tint.accent,
                     .paragraphStyle: labelStyle,
                 ]
             )
@@ -185,14 +191,14 @@ public enum DocumentRenderer {
 
         let body = inlineParagraph(
             text,
-            baseFont: .systemFont(ofSize: 13),
-            indent: 18,
-            spacingAfter: 8,
+            baseFont: .systemFont(ofSize: theme.bodyFontSize),
+            indent: theme.indentUnit,
+            spacingAfter: theme.bodySpacing,
             justified: true,
             formulaRenderer: formulaRenderer
         )
         let mutableBody = NSMutableAttributedString(attributedString: body)
-        mutableBody.addAttribute(.backgroundColor, value: background, range: NSRange(location: 0, length: mutableBody.length))
+        mutableBody.addAttribute(.backgroundColor, value: tint.background, range: NSRange(location: 0, length: mutableBody.length))
         result.append(mutableBody)
 
         return result
@@ -204,12 +210,17 @@ public enum DocumentRenderer {
         level % 2 == 0 ? "•" : "◦"
     }
 
-    private static func listParagraph(_ text: String, level: Int, formulaRenderer: FormulaRenderer?) -> NSAttributedString {
+    private static func listParagraph(
+        _ text: String,
+        level: Int,
+        theme: DocumentTheme,
+        formulaRenderer: FormulaRenderer?
+    ) -> NSAttributedString {
         inlineParagraph(
             text,
-            baseFont: .systemFont(ofSize: 13),
-            indent: CGFloat(level) * 18,
-            spacingAfter: 4,
+            baseFont: .systemFont(ofSize: theme.bodyFontSize),
+            indent: CGFloat(level) * theme.indentUnit,
+            spacingAfter: theme.listItemSpacing,
             justified: false,
             formulaRenderer: formulaRenderer
         )
@@ -217,29 +228,20 @@ public enum DocumentRenderer {
 
     // MARK: - Code blocks
 
-    /// Light gray, matching `TableRenderer.headerBackground`'s fixed (non-dynamic) shading —
-    /// these are exported files read outside the app's own theme, so a fixed tone reads
-    /// correctly regardless of the viewer's system appearance, unlike `PlatformColor.textBackgroundColor`.
-    /// DOCX picks this up for free via `.backgroundColor` (AppKit's OOXML writer maps it to Word's
-    /// own text shading); PDF needs `PDFRenderer` to paint it manually, since raw `CTFrameDraw`
-    /// never honors this attribute on its own (see that file's `drawBackgroundColors`).
-    public static let codeBlockBackground = PlatformColor(white: 0.95, alpha: 1)
-
-    private static func codeParagraph(_ lines: [String]) -> NSAttributedString {
+    private static func codeParagraph(_ lines: [String], theme: DocumentTheme) -> NSAttributedString {
         let style = NSMutableParagraphStyle()
-        style.paragraphSpacingBefore = 4
-        style.paragraphSpacing = 12
+        style.paragraphSpacingBefore = theme.codeBlockSpacingBefore
+        style.paragraphSpacing = theme.codeBlockSpacingAfter
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: PlatformFont.monospacedSystemFont(ofSize: 12, weight: .regular),
-            // Fixed black, not the dynamic `.textColor` — same bug class already fixed in
-            // `TableRenderer`'s cell text and a consumer's formula rendering: a dynamic semantic
-            // color resolves to something barely visible when drawn into a raw `CGContext`
-            // outside any live window (`PDFRenderer`'s PDF page). Confirmed by opening an actual
-            // generated PDF with a code block — the text was there (present in the text layer)
-            // but rendered nearly invisible, not caught by any passing unit test since none of
-            // them assert on the *color*, only on the text's presence/attributes.
-            .foregroundColor: PlatformColor.black,
-            .backgroundColor: codeBlockBackground,
+            .font: PlatformFont.monospacedSystemFont(ofSize: theme.codeFontSize, weight: .regular),
+            // Fixed by default (`theme.codeText`), not a dynamic system color — a dynamic
+            // semantic color resolves to something barely visible when drawn into a raw
+            // `CGContext` outside any live window (`PDFRenderer`'s PDF page). Confirmed by
+            // opening an actual generated PDF with a code block — the text was there (present in
+            // the text layer) but rendered nearly invisible, not caught by any passing unit test
+            // since none of them assert on the *color*, only on the text's presence/attributes.
+            .foregroundColor: theme.codeText,
+            .backgroundColor: theme.codeBlockBackground,
             .paragraphStyle: style,
         ]
         return NSAttributedString(string: lines.joined(separator: "\n") + "\n", attributes: attributes)
@@ -257,15 +259,23 @@ public enum DocumentRenderer {
         header: [String],
         alignments: [TableAlignment],
         rows: [[String]],
-        contentWidth: CGFloat
+        contentWidth: CGFloat,
+        theme: DocumentTheme
     ) -> NSAttributedString {
-        guard let attachment = TableAttachment(header: header, alignments: alignments, rows: rows, maxWidth: contentWidth)
+        guard
+            let attachment = TableAttachment(
+                header: header,
+                alignments: alignments,
+                rows: rows,
+                maxWidth: contentWidth,
+                theme: theme
+            )
         else {
             // Falls back to a plain-text rendering of the table rather than silently dropping
             // it — mirrors the fallback for a formula that can't be rendered (show the raw
             // source, don't just disappear).
             let plain = ([header] + rows).map { $0.joined(separator: " | ") }.joined(separator: "\n")
-            return codeParagraph(plain.components(separatedBy: "\n"))
+            return codeParagraph(plain.components(separatedBy: "\n"), theme: theme)
         }
 
         let result = NSMutableAttributedString(attributedString: NSAttributedString(attachment: attachment))
@@ -277,7 +287,8 @@ public enum DocumentRenderer {
         // widening the run's own reported descent to fake a trailing gap moved the *next*
         // block's line into the wrong place rather than adding clean space. A real line made of
         // ordinary text has no such issue (confirmed: normal paragraph-to-paragraph spacing
-        // already renders correctly), so that's what creates the gap here.
+        // already renders correctly), so that's what creates the gap here. Not theme-controlled:
+        // this is an internal pagination workaround, not a visible style choice.
         result.append(NSAttributedString(string: "\n", attributes: [.font: PlatformFont.systemFont(ofSize: 40)]))
         return result
     }
@@ -473,18 +484,17 @@ public enum DocumentRenderer {
     /// why the workaround is a plain extra line rather than `NSParagraphStyle.paragraphSpacing`).
     /// Falls back to a code-styled block (not a plain paragraph) when unrendered, so raw LaTeX at
     /// least reads as "this was meant to be a formula" rather than garbled prose.
-    private static func formulaParagraph(latex: String, formulaRenderer: FormulaRenderer?) -> NSAttributedString {
-        let displayFontSize: CGFloat = 16
+    private static func formulaParagraph(latex: String, theme: DocumentTheme, formulaRenderer: FormulaRenderer?) -> NSAttributedString {
         guard
             let attachment = renderedFormulaAttachment(
                 latex: latex,
                 displayMode: true,
-                fontSize: displayFontSize,
+                fontSize: theme.formulaDisplayFontSize,
                 formulaRenderer: formulaRenderer,
                 baselineAligned: false
             )
         else {
-            return codeParagraph(["\\[\(latex)\\]"])
+            return codeParagraph(["\\[\(latex)\\]"], theme: theme)
         }
         let result = NSMutableAttributedString(attributedString: attachment)
         result.append(NSAttributedString(string: "\n"))
@@ -518,10 +528,11 @@ public enum DocumentRenderer {
         altText: String,
         source: String,
         contentWidth: CGFloat,
+        theme: DocumentTheme,
         imageRenderer: ImageRenderer?
     ) -> NSAttributedString {
         guard let image = decodeDataURIImage(source) ?? imageRenderer?.image(forSource: source, altText: altText) else {
-            return missingImageParagraph(altText: altText)
+            return missingImageParagraph(altText: altText, theme: theme)
         }
 
         let naturalSize = image.size
@@ -538,15 +549,15 @@ public enum DocumentRenderer {
         return result
     }
 
-    private static func missingImageParagraph(altText: String) -> NSAttributedString {
+    private static func missingImageParagraph(altText: String, theme: DocumentTheme) -> NSAttributedString {
         let text = altText.isEmpty ? "[image]" : "[image: \(altText)]"
         let style = NSMutableParagraphStyle()
-        style.paragraphSpacing = 8
+        style.paragraphSpacing = theme.bodySpacing
         return NSAttributedString(
             string: text + "\n",
             attributes: [
-                .font: italicSystemFont(ofSize: 13),
-                .foregroundColor: PlatformColor.documentSecondaryText,
+                .font: italicSystemFont(ofSize: theme.bodyFontSize),
+                .foregroundColor: theme.secondaryText,
                 .paragraphStyle: style,
             ]
         )
