@@ -1,0 +1,25 @@
+name: Swift
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    # AppKit/CoreText-backed code (DocumentRenderer, PDFRenderer, TableRenderer) is macOS-only —
+    # this package can't build or run its tests on a Linux runner at all.
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Test
+        run: swift test
