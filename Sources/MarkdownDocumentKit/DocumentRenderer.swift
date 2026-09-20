@@ -225,7 +225,14 @@ public enum DocumentRenderer {
         style.paragraphSpacing = 12
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
-            .foregroundColor: NSColor.textColor,
+            // Fixed black, not the dynamic `.textColor` — same bug class already fixed in
+            // `TableRenderer`'s cell text and a consumer's formula rendering: a dynamic semantic
+            // color resolves to something barely visible when drawn into a raw `CGContext`
+            // outside any live window (`PDFRenderer`'s PDF page). Confirmed by opening an actual
+            // generated PDF with a code block — the text was there (present in the text layer)
+            // but rendered nearly invisible, not caught by any passing unit test since none of
+            // them assert on the *color*, only on the text's presence/attributes.
+            .foregroundColor: NSColor.black,
             .backgroundColor: codeBlockBackground,
             .paragraphStyle: style,
         ]

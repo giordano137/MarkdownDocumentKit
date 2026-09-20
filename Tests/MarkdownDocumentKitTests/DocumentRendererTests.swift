@@ -161,6 +161,19 @@ private struct MockImageRenderer: ImageRenderer {
     #expect(background == DocumentRenderer.codeBlockBackground)
 }
 
+@Test func codeBlockTextColorIsFixedNotDynamic() {
+    // Regression guard: this used to be the dynamic `NSColor.textColor`, which resolved to a
+    // barely-visible near-white when `PDFRenderer` drew it into a raw CGContext with no live
+    // window/appearance to resolve against — confirmed by opening an actual generated PDF, not
+    // caught by `codeBlockCarriesBackgroundColorForShading` above (attribute presence and color
+    // correctness are different assertions).
+    let blocks: [DocumentBlock] = [.codeBlock(lines: ["let x = 1"])]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+    let range = (attributed.string as NSString).range(of: "let x = 1")
+    let foreground = attributed.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor
+    #expect(foreground == NSColor.black)
+}
+
 @Test func rendersBlockquoteTextItalicizedAndIndented() {
     let blocks: [DocumentBlock] = [.blockquote(text: "A wise quote.")]
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
