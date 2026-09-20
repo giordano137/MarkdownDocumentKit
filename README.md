@@ -71,9 +71,20 @@ code needed beyond a `FormulaRenderer` implementation for math).
       picture.
 - [x] Blockquotes (`> ...`): indented/italic/muted paragraph, joining
       consecutive `>` lines into one block.
-- [ ] Phase 3 (remaining): `[!NOTE]`/`[!TIP]`/`[!WARNING]`/`[!IMPORTANT]`
-      callouts as tinted, icon-labeled rounded boxes (a blockquote already
-      renders; the tinted/iconed box styling on top doesn't exist yet).
+- [x] Phase 3: GFM alert callouts — `> [!NOTE]`/`[!TIP]`/`[!WARNING]`/
+      `[!IMPORTANT]` (case-insensitive, the marker has to be the blockquote's
+      entire first line) parse into `.callout(kind:text:)`, distinct from a
+      plain `.blockquote`. Rendered as a bold, accent-colored kind label
+      ("Note"/"Tip"/"Warning"/"Important" — a plain text label, not an
+      icon/emoji glyph: those risk rendering oddly through `PDFRenderer`'s
+      raw CoreText text-showing operators) above the body text, tinted via
+      a `.backgroundColor` attribute — the same mechanism
+      `codeBlockBackground` already used, now also drawn with rounded
+      corners in `PDFRenderer` rather than a flat rect (DOCX's shading stays
+      square either way — Word's own text shading has no rounded-corner
+      equivalent). Each kind gets its own fixed (not dynamic — an exported
+      file has no live theme to resolve against) background/accent color
+      pair.
 - [x] Phase 4 (formulas): `FormulaRenderer` injection point — a consumer
       implements it on top of its own SwiftMath (or similar) call.
       `\[...\]`/`$$...$$` on their own line (or as their own fenced
