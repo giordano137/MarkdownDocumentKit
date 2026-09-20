@@ -45,9 +45,10 @@ optional capability rather than a hard dependency.
 
 ## Status
 
-Phases 1, 2, 4, and 5 done and in real production use by a consuming app's
-document-export feature (parse → render → paginate to PDF/DOCX, no glue
-code needed beyond a `FormulaRenderer` implementation for math).
+Phases 1 through 5, plus images, done and in real production use by a
+consuming app's document-export feature (parse → render → paginate to
+PDF/DOCX; a `FormulaRenderer` and/or `ImageRenderer` implementation is
+the only glue code a consumer needs to add math/images on top).
 
 - [x] Phase 1: block layout core — headings, paragraphs (justified,
       hyphenated), lists, fenced code blocks. `DocumentBlock`/`DocumentParser`
@@ -124,6 +125,17 @@ code needed beyond a `FormulaRenderer` implementation for math).
       Still shared: everything Phase 1 covers. Still open: rounded table
       corners + centering, and giving DOCX a real (not image) table too via
       `NSTextTable`/`NSTextTableBlock`.
+- [x] Images: a whole-line `![alt](source)` becomes an `.image` block,
+      scaled down to fit the page's content width (never scaled up) and
+      never mistaken for an inline image mid-sentence — like `.formula`,
+      only a whole-line match counts (bounded, block-level scope, not full
+      CommonMark inline parsing). A `data:image/...;base64,...` source
+      decodes directly with zero consumer code, since the bytes are already
+      in the Markdown; a local path or remote URL needs an injected
+      `ImageRenderer` (this package does no disk/network I/O of its own,
+      same reasoning as `FormulaRenderer`). No renderer, or one that
+      returns `nil`, falls back to showing the alt text.
+- [ ] `DiagramRenderer` (Mermaid) — not started, see Phase 4's note above.
 
 ## Requirements
 
