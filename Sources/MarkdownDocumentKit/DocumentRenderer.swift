@@ -24,7 +24,8 @@ public enum DocumentRenderer {
         from blocks: [DocumentBlock],
         title: String,
         contentWidth: CGFloat = defaultContentWidth,
-        formulaRenderer: FormulaRenderer? = nil
+        formulaRenderer: FormulaRenderer? = nil,
+        imageRenderer: ImageRenderer? = nil
     ) -> NSAttributedString {
         let result = NSMutableAttributedString()
         result.append(styledTitle(title))
@@ -55,6 +56,9 @@ public enum DocumentRenderer {
 
             case .formula(let latex):
                 result.append(formulaParagraph(latex: latex, formulaRenderer: formulaRenderer))
+
+            case .image(let altText, let source):
+                result.append(imageParagraph(altText: altText, source: source, contentWidth: contentWidth, imageRenderer: imageRenderer))
             }
         }
         return result
@@ -478,6 +482,66 @@ public enum DocumentRenderer {
         result.append(NSAttributedString(string: "\n"))
         result.append(NSAttributedString(string: "\n", attributes: [.font: NSFont.systemFont(ofSize: 40)]))
         return result
+    }
+
+    // MARK: - Images
+
+    /// Decodes a `data:image/...;base64,...` source directly — the one image source this package
+    /// can resolve without any consumer-supplied I/O, since the bytes are already embedded right
+    /// in the Markdown itself. Anything else (a local path, a remote URL) goes to the injected
+    /// `ImageRenderer` instead, same "consumer supplies the capability that needs I/O" shape as
+    /// `FormulaRenderer`.
+    private static func decodeDataURIImage(_ source: String) -> NSImage? {
+        guard source.hasPrefix("data:"), let commaIndex = source.firstIndex(of: ",") else { return nil }
+        let meta = source[source.index(source.startIndex, offsetBy: 5)..<commaIndex]
+        guard meta.contains(";base64") else { return nil }
+        let base64 = String(source[source.index(after: commaIndex)...])
+        guard let data = Data(base64Encoded: base64) else { return nil }
+        return NSImage(data: data)
+    }
+
+    /// An `.image` block's own line — scaled down (preserving aspect ratio) if it's wider than
+    /// the page's content width, never scaled up (a small image stays small rather than
+    /// pixelating). Falls back to the alt text, not a blank gap, when the source can't be
+    /// resolved at all (no renderer supplied, a `data:` URI that fails to decode, or the renderer
+    /// itself returning `nil`) — same "show something, don't just disappear" philosophy every
+    /// other block-level fallback in this file already follows.
+    private static func imageParagraph(
+        altText: String,
+        source: String,
+        contentWidth: CGFloat,
+        imageRenderer: ImageRenderer?
+    ) -> NSAttributedString {
+        guard let image = decodeDataURIImage(source) ?? imageRenderer?.image(forSource: source, altText: altText) else {
+            return missingImageParagraph(altText: altText)
+        }
+
+        let naturalSize = image.size
+        let scale = naturalSize.width > contentWidth ? contentWidth / naturalSize.width : 1
+        let displaySize = CGSize(width: naturalSize.width * scale, height: naturalSize.height * scale)
+
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        attachment.bounds = CGRect(origin: .zero, size: displaySize)
+
+        let result = NSMutableAttributedString(attributedString: NSAttributedString(attachment: attachment))
+        result.append(NSAttributedString(string: "\n"))
+        result.append(NSAttributedString(string: "\n", attributes: [.font: NSFont.systemFont(ofSize: 40)]))
+        return result
+    }
+
+    private static func missingImageParagraph(altText: String) -> NSAttributedString {
+        let text = altText.isEmpty ? "[image]" : "[image: \(altText)]"
+        let style = NSMutableParagraphStyle()
+        style.paragraphSpacing = 8
+        return NSAttributedString(
+            string: text + "\n",
+            attributes: [
+                .font: NSFontManager.shared.convert(.systemFont(ofSize: 13), toHaveTrait: .italicFontMask),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: style,
+            ]
+        )
     }
 }
 #endif

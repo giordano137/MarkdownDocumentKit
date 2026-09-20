@@ -49,9 +49,14 @@ public enum DocumentBlock: Equatable {
     /// which extracts it from a `.paragraph`/`.listItem`/`.blockquote`'s text at render time so it
     /// keeps flowing with the surrounding words instead of breaking the paragraph apart.
     case formula(latex: String)
-
-    // Phase 3+: `.image` lands here as it's implemented — every existing renderer only needs a
-    // new `case` arm added, not a rewrite.
+    /// A standalone `![alt](source)` image, recognized only when it's the *entire* line — like
+    /// `.formula`, this package doesn't attempt inline image flow mid-sentence (bounded,
+    /// block-level scope, not full CommonMark inline parsing; see README). `source` is whatever
+    /// the Markdown wrote verbatim: a `data:image/...;base64,...` URI (which `DocumentRenderer`
+    /// decodes directly, no consumer code needed), a local file path, or a remote URL (both of
+    /// which need an injected `ImageRenderer`, since this package does no disk/network I/O of
+    /// its own).
+    case image(altText: String, source: String)
 }
 
 /// Turns Markdown source into `[DocumentBlock]`. Line-oriented, not a full CommonMark
@@ -99,6 +104,12 @@ public enum DocumentParser {
 
             if let heading = parseHeading(trimmed) {
                 blocks.append(heading)
+                index += 1
+                continue
+            }
+
+            if let image = parseImageLine(trimmed) {
+                blocks.append(image)
                 index += 1
                 continue
             }
@@ -304,6 +315,21 @@ public enum DocumentParser {
         case "IMPORTANT": return .important
         default: return nil
         }
+    }
+
+    // MARK: - Images
+
+    /// Recognizes a whole-line `![alt](source)`. Deliberately simple, not full CommonMark link
+    /// syntax: alt text can't contain `]`, source can't contain `)` — a fine trade for a bounded
+    /// implementation (see README) that covers what a model actually writes for an image link.
+    private static func parseImageLine(_ trimmed: String) -> DocumentBlock? {
+        guard let regex = try? NSRegularExpression(pattern: "^!\\[([^\\]]*)\\]\\(([^)]*)\\)$") else { return nil }
+        let nsRange = NSRange(location: 0, length: (trimmed as NSString).length)
+        guard let match = regex.firstMatch(in: trimmed, range: nsRange),
+            let altRange = Range(match.range(at: 1), in: trimmed),
+            let sourceRange = Range(match.range(at: 2), in: trimmed)
+        else { return nil }
+        return .image(altText: String(trimmed[altRange]), source: String(trimmed[sourceRange]))
     }
 
     private static func normalizedRow(_ row: [String], toWidth width: Int) -> [String] {

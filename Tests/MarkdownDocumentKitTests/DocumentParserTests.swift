@@ -67,6 +67,22 @@ import Testing
     )
 }
 
+@Test func parsesWholeLineImageMarkdown() {
+    let blocks = DocumentParser.parse("![A diagram](https://example.com/diagram.png)")
+    #expect(blocks == [.image(altText: "A diagram", source: "https://example.com/diagram.png")])
+}
+
+@Test func parsesImageWithEmptyAltText() {
+    let blocks = DocumentParser.parse("![](local.png)")
+    #expect(blocks == [.image(altText: "", source: "local.png")])
+}
+
+@Test func imageMentionedMidSentenceStaysPlainParagraphText() {
+    // Bounded, block-level scope (see README) — only a whole-line image is its own block.
+    let blocks = DocumentParser.parse("See ![alt](x.png) above.")
+    #expect(blocks == [.paragraph(text: "See ![alt](x.png) above.")])
+}
+
 @Test func parsesCalloutMarkerAsItsKind() {
     for (marker, kind) in [("NOTE", CalloutKind.note), ("TIP", .tip), ("WARNING", .warning), ("IMPORTANT", .important)] {
         let blocks = DocumentParser.parse("> [!\(marker)]\n> Body text.")

@@ -60,6 +60,73 @@ private struct MockFormulaRenderer: FormulaRenderer {
     #expect(attributed.string.contains("$W$"))
 }
 
+/// A tiny (1x1 transparent) real PNG, so tests can exercise actual image decoding rather than a
+/// synthetic `NSImage(size:)` that was never really encoded/decoded.
+private let tinyPNGBase64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+
+private struct MockImageRenderer: ImageRenderer {
+    var shouldFail: Bool = false
+
+    func image(forSource source: String, altText: String) -> NSImage? {
+        guard !shouldFail else { return nil }
+        return NSImage(size: NSSize(width: 10, height: 10))
+    }
+}
+
+@Test func imageWithDataURISourceDecodesWithoutAnyRendererSupplied() {
+    let blocks: [DocumentBlock] = [.image(altText: "dot", source: "data:image/png;base64,\(tinyPNGBase64)")]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+    var foundAttachment = false
+    attributed.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributed.length)) { value, _, _ in
+        if value is NSTextAttachment { foundAttachment = true }
+    }
+    #expect(foundAttachment)
+}
+
+@Test func imageWithRemoteSourceUsesInjectedImageRenderer() {
+    let blocks: [DocumentBlock] = [.image(altText: "diagram", source: "https://example.com/diagram.png")]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "", imageRenderer: MockImageRenderer())
+    var foundAttachment = false
+    attributed.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributed.length)) { value, _, _ in
+        if value is NSTextAttachment { foundAttachment = true }
+    }
+    #expect(foundAttachment)
+}
+
+@Test func imageFallsBackToAltTextWithoutARendererOrDataURI() {
+    let blocks: [DocumentBlock] = [.image(altText: "A diagram", source: "https://example.com/diagram.png")]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+    #expect(attributed.string.contains("A diagram"))
+}
+
+@Test func imageFallsBackWhenInjectedRendererCannotResolveIt() {
+    let blocks: [DocumentBlock] = [.image(altText: "A diagram", source: "https://example.com/missing.png")]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "", imageRenderer: MockImageRenderer(shouldFail: true))
+    #expect(attributed.string.contains("A diagram"))
+}
+
+@Test func imageWiderThanContentWidthIsScaledDownPreservingAspectRatio() {
+    struct WideImageRenderer: ImageRenderer {
+        func image(forSource source: String, altText: String) -> NSImage? {
+            NSImage(size: NSSize(width: 2000, height: 1000))
+        }
+    }
+    let blocks: [DocumentBlock] = [.image(altText: "wide", source: "wide.png")]
+    let attributed = DocumentRenderer.attributedString(
+        from: blocks,
+        title: "",
+        contentWidth: 500,
+        imageRenderer: WideImageRenderer()
+    )
+    var attachmentSize: NSSize?
+    attributed.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributed.length)) { value, _, _ in
+        if let attachment = value as? NSTextAttachment { attachmentSize = attachment.bounds.size }
+    }
+    #expect(attachmentSize?.width == 500)
+    #expect(attachmentSize?.height == 250)
+}
+
 @Test func rendersTitleAndHeadingText() {
     let blocks: [DocumentBlock] = [.heading(level: 1, text: "Section"), .paragraph(text: "Body.")]
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "My Document")
