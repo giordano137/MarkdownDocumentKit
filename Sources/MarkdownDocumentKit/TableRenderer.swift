@@ -10,9 +10,26 @@
 // piece that split out for that — same column-width/row-height math, but returning the styled
 // `NSAttributedString`s and geometry for `PDFRenderer` to draw for real, instead of only ever
 // handing back a finished image. See `TableAttachment`.
+//
+// All actual drawing (`drawTable`/`drawRow`/`drawGrid`) goes through raw CoreText/CoreGraphics —
+// `CTFramesetter`+`CTFrameDraw` for cell text, `CGContext` fill/stroke for backgrounds and grid
+// lines — deliberately not `NSAttributedString.draw(with:)`/`NSBezierPath`/`UIBezierPath`. Those
+// convenience APIs draw into whatever the platform's own "current graphics context" is and, on
+// UIKit, assume that context uses UIKit's own top-left/y-down coordinate convention; a PDF page's
+// CGContext is natively bottom-left/y-up (the PDF spec's own convention, not an OS choice), so
+// text drawn that way through UIKit's convenience layer would come out flipped. Raw CoreText draws
+// into whatever explicit CGContext you hand it, respecting that context's actual coordinate
+// system — the same approach `PDFRenderer` already uses for the whole document, extended here to
+// table cells specifically. This also means `drawTable`/`drawRow`/`drawGrid` need no
+// platform-specific branch at all: they're identical on macOS and iOS.
 
-#if os(macOS)
+#if canImport(AppKit) || canImport(UIKit)
+#if canImport(AppKit)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
+import CoreText
 import Foundation
 
 /// Everything needed to draw a table for real: styled (aligned, bold/italic-preserving) cell
@@ -28,14 +45,14 @@ public struct TableLayout {
 }
 
 public enum TableRenderer {
-    public static let cellFont = NSFont.systemFont(ofSize: 12)
-    public static let headerFont = NSFont.boldSystemFont(ofSize: 12)
+    public static let cellFont = PlatformFont.systemFont(ofSize: 12)
+    public static let headerFont = PlatformFont.boldSystemFont(ofSize: 12)
     public static let horizontalPadding: CGFloat = 8
     public static let verticalPadding: CGFloat = 5
     public static let minRowHeight: CGFloat = 22
     public static let minColumnWidth: CGFloat = 36
-    public static let borderColor = NSColor(white: 0.75, alpha: 1)
-    public static let headerBackground = NSColor(white: 0.91, alpha: 1)
+    public static let borderColor = PlatformColor(white: 0.75, alpha: 1)
+    public static let headerBackground = PlatformColor(white: 0.91, alpha: 1)
     private static let bitmapScale: CGFloat = 2  // crisp at typical PDF/print viewing sizes
 
     /// `maxWidth` is the available content width (e.g. a page's width minus margins) the table
@@ -71,9 +88,14 @@ public enum TableRenderer {
             var tallest: CGFloat = 0
             for (column, cell) in cells.enumerated() {
                 let constrainedWidth = columnWidths[column] - horizontalPadding * 2
+                // `context:` has a default value on AppKit's overload but is a required
+                // parameter on UIKit's — passing it explicitly (nil is fine on both; it's only
+                // used to report actual vs. requested scale factor, irrelevant here) keeps this
+                // call source-compatible with both.
                 let bounds = cell.boundingRect(
                     with: CGSize(width: max(constrainedWidth, 1), height: .greatestFiniteMagnitude),
-                    options: [.usesLineFragmentOrigin, .usesFontLeading]
+                    options: [.usesLineFragmentOrigin, .usesFontLeading],
+                    context: nil
                 )
                 tallest = max(tallest, bounds.height)
             }
@@ -115,55 +137,23 @@ public enum TableRenderer {
         alignments: [TableAlignment],
         rows: [[String]],
         maxWidth: CGFloat
-    ) -> (image: NSImage, size: CGSize)? {
+    ) -> (image: PlatformImage, size: CGSize)? {
         guard let layout = computeLayout(header: header, alignments: alignments, rows: rows, maxWidth: maxWidth)
         else { return nil }
 
-        guard
-            let rep = NSBitmapImageRep(
-                bitmapDataPlanes: nil,
-                pixelsWide: Int(layout.totalSize.width * bitmapScale),
-                pixelsHigh: Int(layout.totalSize.height * bitmapScale),
-                bitsPerSample: 8,
-                samplesPerPixel: 4,
-                hasAlpha: true,
-                isPlanar: false,
-                colorSpaceName: .deviceRGB,
-                bytesPerRow: 0,
-                bitsPerPixel: 0
-            )
-        else { return nil }
-        rep.size = layout.totalSize
-
-        NSGraphicsContext.saveGraphicsState()
-        defer { NSGraphicsContext.restoreGraphicsState() }
-        guard let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
-        NSGraphicsContext.current = context
-        // No manual `scaleBy` here — `NSGraphicsContext(bitmapImageRep:)` already maps its
-        // drawing coordinate space to `rep.size` (the point size set above) regardless of the
-        // rep's actual pixel dimensions, so the `bitmapScale`-many extra pixels allocated for
-        // Retina crispness are already accounted for automatically. Scaling again on top of that
-        // halved (in each axis) the space drawing calls actually had to work with — everything
-        // past the resulting midpoint landed outside the pixel buffer and never made it into the
-        // image, which read as "top and right of the table missing" rather than a scale bug.
-        drawTable(layout, in: context.cgContext, origin: .zero)
-
-        let image = NSImage(size: layout.totalSize)
-        image.addRepresentation(rep)
-        return (image, layout.totalSize)
+        return renderToImage(size: layout.totalSize, scale: bitmapScale) { context in
+            drawTable(layout, in: context, origin: .zero)
+        }.map { ($0, layout.totalSize) }
     }
 
     /// Draws borders, header shading, and every cell's real text directly into `context` at
-    /// `origin` (bottom-left of the table, same non-flipped bottom-left-origin convention as a
-    /// fresh bitmap context or a PDF page) — the piece that makes PDF export's table text
-    /// genuinely selectable: `context` here is the PDF page's own content stream, so this ends
-    /// up as real text-showing operators, not a flattened image.
+    /// `origin` (bottom-left of the table, matching a PDF page's own bottom-left-origin
+    /// convention) — the piece that makes PDF export's table text genuinely selectable: `context`
+    /// here is the PDF page's own content stream, so this ends up as real text-showing operators,
+    /// not a flattened image. `renderToImage` (used by `render` above) pre-flips its own offscreen
+    /// context to this same bottom-left convention before calling in here, so this function itself
+    /// never needs to know or care which of the two callers it's being used from.
     public static func drawTable(_ layout: TableLayout, in context: CGContext, origin: CGPoint) {
-        let nsContext = NSGraphicsContext(cgContext: context, flipped: false)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = nsContext
-        defer { NSGraphicsContext.restoreGraphicsState() }
-
         // Top-down drawing: track the top edge of the row about to be drawn and subtract, rather
         // than accumulate from y=0, so row 0 (the header) ends up visually on top without
         // needing a flipped coordinate space.
@@ -174,15 +164,24 @@ public enum TableRenderer {
             originX: origin.x,
             top: rowTop,
             height: layout.headerHeight,
-            background: headerBackground
+            background: headerBackground,
+            context: context
         )
         rowTop -= layout.headerHeight
         for (rowIndex, cells) in layout.bodyCells.enumerated() {
             let height = layout.rowHeights[rowIndex]
-            drawRow(cells: cells, columnWidths: layout.columnWidths, originX: origin.x, top: rowTop, height: height, background: nil)
+            drawRow(
+                cells: cells,
+                columnWidths: layout.columnWidths,
+                originX: origin.x,
+                top: rowTop,
+                height: height,
+                background: nil,
+                context: context
+            )
             rowTop -= height
         }
-        drawGrid(layout, origin: origin)
+        drawGrid(layout, origin: origin, context: context)
     }
 
     private static func drawRow(
@@ -191,51 +190,61 @@ public enum TableRenderer {
         originX: CGFloat,
         top: CGFloat,
         height: CGFloat,
-        background: NSColor?
+        background: PlatformColor?,
+        context: CGContext
     ) {
         var x: CGFloat = originX
         for (column, cell) in cells.enumerated() {
             let width = columnWidths[column]
             let cellRect = CGRect(x: x, y: top - height, width: width, height: height)
             if let background {
-                background.setFill()
-                cellRect.fill()
+                context.setFillColor(background.cgColor)
+                context.fill(cellRect)
             }
             let textRect = cellRect.insetBy(dx: horizontalPadding, dy: verticalPadding)
-            cell.draw(with: textRect, options: [.usesLineFragmentOrigin, .usesFontLeading])
+            drawText(cell, in: textRect, context: context)
             x += width
         }
     }
 
-    private static func drawGrid(_ layout: TableLayout, origin: CGPoint) {
-        borderColor.setStroke()
-        let path = NSBezierPath()
-        path.lineWidth = 1
+    /// Draws `attributedString` into `rect` of `context` via CoreText directly — see this file's
+    /// top-of-file comment for why not `NSAttributedString.draw(with:)`.
+    private static func drawText(_ attributedString: NSAttributedString, in rect: CGRect, context: CGContext) {
+        let framesetter = CTFramesetterCreateWithAttributedString(attributedString)
+        let path = CGPath(rect: rect, transform: nil)
+        let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0), path, nil)
+        CTFrameDraw(frame, context)
+    }
+
+    private static func drawGrid(_ layout: TableLayout, origin: CGPoint, context: CGContext) {
+        context.setStrokeColor(borderColor.cgColor)
+        context.setLineWidth(1)
         let rowHeights = [layout.headerHeight] + layout.rowHeights
 
+        context.beginPath()
         var y: CGFloat = origin.y + layout.totalSize.height
-        path.move(to: CGPoint(x: origin.x, y: y))
-        path.line(to: CGPoint(x: origin.x + layout.totalSize.width, y: y))
+        context.move(to: CGPoint(x: origin.x, y: y))
+        context.addLine(to: CGPoint(x: origin.x + layout.totalSize.width, y: y))
         for height in rowHeights {
             y -= height
-            path.move(to: CGPoint(x: origin.x, y: y))
-            path.line(to: CGPoint(x: origin.x + layout.totalSize.width, y: y))
+            context.move(to: CGPoint(x: origin.x, y: y))
+            context.addLine(to: CGPoint(x: origin.x + layout.totalSize.width, y: y))
         }
 
         var x: CGFloat = origin.x
-        path.move(to: CGPoint(x: x, y: origin.y))
-        path.line(to: CGPoint(x: x, y: origin.y + layout.totalSize.height))
+        context.move(to: CGPoint(x: x, y: origin.y))
+        context.addLine(to: CGPoint(x: x, y: origin.y + layout.totalSize.height))
         for width in layout.columnWidths {
             x += width
-            path.move(to: CGPoint(x: x, y: origin.y))
-            path.line(to: CGPoint(x: x, y: origin.y + layout.totalSize.height))
+            context.move(to: CGPoint(x: x, y: origin.y))
+            context.addLine(to: CGPoint(x: x, y: origin.y + layout.totalSize.height))
         }
-        path.stroke()
+        context.strokePath()
     }
 
     /// Same inline-Markdown-then-style approach as `DocumentRenderer`'s own paragraphs, so a
     /// **bold** table cell renders bold instead of showing literal asterisks.
-    private static func cellAttributedString(_ text: String, font: NSFont, alignment: TableAlignment) -> NSAttributedString {
+    private static func cellAttributedString(_ text: String, font: PlatformFont, alignment: TableAlignment) -> NSAttributedString {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         let inline = (try? NSAttributedString(markdown: text, options: options)) ?? NSAttributedString(string: text)
         let mutable = NSMutableAttributedString(attributedString: inline)
@@ -248,7 +257,7 @@ public enum TableRenderer {
         case .right: style.alignment = .right
         }
         mutable.addAttribute(.paragraphStyle, value: style, range: fullRange)
-        // Fixed black, not the dynamic `.textColor` — this text gets drawn straight into a raw
+        // Fixed black, not a dynamic system color — this text gets drawn straight into a raw
         // `CGContext`/PDF content stream (`drawTable`, called by `PDFRenderer` outside any live
         // window), where a dynamic semantic color can resolve to something else entirely; in
         // practice it resolved to a color barely distinguishable from the page background,
@@ -256,15 +265,11 @@ public enum TableRenderer {
         // color attribute existing and a color being visible are different assertions). Matches
         // `DocumentRenderer.codeBlockBackground`'s already-established reasoning for the same
         // "exported file, no live theme to resolve against" situation.
-        mutable.addAttribute(.foregroundColor, value: NSColor.black, range: fullRange)
+        mutable.addAttribute(.foregroundColor, value: PlatformColor.black, range: fullRange)
 
         mutable.enumerateAttribute(.font, in: fullRange, options: []) { value, range, _ in
-            let traits = (value as? NSFont)?.fontDescriptor.symbolicTraits ?? []
-            var descriptor = font.fontDescriptor
-            if !traits.isDisjoint(with: [.bold, .italic]) {
-                descriptor = descriptor.withSymbolicTraits(traits.intersection([.bold, .italic]))
-            }
-            mutable.addAttribute(.font, value: NSFont(descriptor: descriptor, size: font.pointSize) ?? font, range: range)
+            let resolvedFont = applyingPreservedBoldItalic(from: value as? PlatformFont, to: font)
+            mutable.addAttribute(.font, value: resolvedFont, range: range)
         }
         return mutable
     }

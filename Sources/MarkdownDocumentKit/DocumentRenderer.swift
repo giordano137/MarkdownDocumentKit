@@ -1,16 +1,22 @@
 // DocumentRenderer
 //
-// Turns `[DocumentBlock]` into a styled `NSAttributedString` — the macOS half of Phase 1 (see
-// README). Deliberately in its own `#if os(macOS)`-gated file: `DocumentBlock`/`DocumentParser`
-// stay pure Foundation so a future UIKit renderer is an additive file, not a rewrite of the
-// model underneath it.
+// Turns `[DocumentBlock]` into a styled `NSAttributedString` — works on both AppKit (macOS) and
+// UIKit (iOS) through the `PlatformFont`/`PlatformColor`/`PlatformImage` typealiases and the
+// handful of helpers in `PlatformTypes.swift`; only the couple of genuinely divergent operations
+// (italic font conversion, bold/italic trait preservation) route through those, everything else
+// here is one shared implementation. `DocumentBlock`/`DocumentParser` stay pure Foundation with no
+// gating at all, needed by neither platform's UI frameworks.
 //
 // Two things this improves over a naive Markdown-to-NSAttributedString pass: paragraphs are
 // justified and hyphenated rather than ragged-right, and inline formatting goes through the same
 // `NSAttributedString(markdown:)` pass consistently across every block type instead of only some.
 
-#if os(macOS)
+#if canImport(AppKit) || canImport(UIKit)
+#if canImport(AppKit)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 import Foundation
 
 public enum DocumentRenderer {
@@ -71,7 +77,7 @@ public enum DocumentRenderer {
         style.paragraphSpacing = 16
         return NSAttributedString(
             string: text + "\n",
-            attributes: [.font: NSFont.boldSystemFont(ofSize: 22), .paragraphStyle: style]
+            attributes: [.font: PlatformFont.boldSystemFont(ofSize: 22), .paragraphStyle: style]
         )
     }
 
@@ -117,7 +123,7 @@ public enum DocumentRenderer {
     private static func blockquoteParagraph(_ text: String, formulaRenderer: FormulaRenderer?) -> NSAttributedString {
         let result = inlineParagraph(
             text,
-            baseFont: NSFontManager.shared.convert(.systemFont(ofSize: 13), toHaveTrait: .italicFontMask),
+            baseFont: italicSystemFont(ofSize: 13),
             indent: 18,
             spacingAfter: 8,
             justified: false,
@@ -125,7 +131,7 @@ public enum DocumentRenderer {
         )
         let mutable = NSMutableAttributedString(attributedString: result)
         let fullRange = NSRange(location: 0, length: mutable.length)
-        mutable.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: fullRange)
+        mutable.addAttribute(.foregroundColor, value: PlatformColor.documentSecondaryText, range: fullRange)
         return mutable
     }
 
@@ -134,16 +140,16 @@ public enum DocumentRenderer {
     /// Fixed light tint + a matching darker accent for the label text, per GFM alert kind — fixed
     /// rather than dynamic for the same reason `codeBlockBackground` already is (an exported file
     /// has no live theme to resolve dynamic colors against).
-    private static func calloutTint(for kind: CalloutKind) -> (background: NSColor, accent: NSColor) {
+    private static func calloutTint(for kind: CalloutKind) -> (background: PlatformColor, accent: PlatformColor) {
         switch kind {
         case .note:
-            return (NSColor(red: 0.90, green: 0.95, blue: 1.0, alpha: 1), NSColor(red: 0.16, green: 0.40, blue: 0.85, alpha: 1))
+            return (PlatformColor(red: 0.90, green: 0.95, blue: 1.0, alpha: 1), PlatformColor(red: 0.16, green: 0.40, blue: 0.85, alpha: 1))
         case .tip:
-            return (NSColor(red: 0.89, green: 0.97, blue: 0.90, alpha: 1), NSColor(red: 0.16, green: 0.55, blue: 0.28, alpha: 1))
+            return (PlatformColor(red: 0.89, green: 0.97, blue: 0.90, alpha: 1), PlatformColor(red: 0.16, green: 0.55, blue: 0.28, alpha: 1))
         case .warning:
-            return (NSColor(red: 1.0, green: 0.95, blue: 0.82, alpha: 1), NSColor(red: 0.70, green: 0.48, blue: 0.05, alpha: 1))
+            return (PlatformColor(red: 1.0, green: 0.95, blue: 0.82, alpha: 1), PlatformColor(red: 0.70, green: 0.48, blue: 0.05, alpha: 1))
         case .important:
-            return (NSColor(red: 0.95, green: 0.90, blue: 1.0, alpha: 1), NSColor(red: 0.50, green: 0.20, blue: 0.75, alpha: 1))
+            return (PlatformColor(red: 0.95, green: 0.90, blue: 1.0, alpha: 1), PlatformColor(red: 0.50, green: 0.20, blue: 0.75, alpha: 1))
         }
     }
 
@@ -170,7 +176,7 @@ public enum DocumentRenderer {
             NSAttributedString(
                 string: kind.rawValue + "\n",
                 attributes: [
-                    .font: NSFont.boldSystemFont(ofSize: 13),
+                    .font: PlatformFont.boldSystemFont(ofSize: 13),
                     .foregroundColor: accent,
                     .paragraphStyle: labelStyle,
                 ]
@@ -213,18 +219,18 @@ public enum DocumentRenderer {
 
     /// Light gray, matching `TableRenderer.headerBackground`'s fixed (non-dynamic) shading —
     /// these are exported files read outside the app's own theme, so a fixed tone reads
-    /// correctly regardless of the viewer's system appearance, unlike `NSColor.textBackgroundColor`.
+    /// correctly regardless of the viewer's system appearance, unlike `PlatformColor.textBackgroundColor`.
     /// DOCX picks this up for free via `.backgroundColor` (AppKit's OOXML writer maps it to Word's
     /// own text shading); PDF needs `PDFRenderer` to paint it manually, since raw `CTFrameDraw`
     /// never honors this attribute on its own (see that file's `drawBackgroundColors`).
-    public static let codeBlockBackground = NSColor(white: 0.95, alpha: 1)
+    public static let codeBlockBackground = PlatformColor(white: 0.95, alpha: 1)
 
     private static func codeParagraph(_ lines: [String]) -> NSAttributedString {
         let style = NSMutableParagraphStyle()
         style.paragraphSpacingBefore = 4
         style.paragraphSpacing = 12
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+            .font: PlatformFont.monospacedSystemFont(ofSize: 12, weight: .regular),
             // Fixed black, not the dynamic `.textColor` — same bug class already fixed in
             // `TableRenderer`'s cell text and a consumer's formula rendering: a dynamic semantic
             // color resolves to something barely visible when drawn into a raw `CGContext`
@@ -232,7 +238,7 @@ public enum DocumentRenderer {
             // generated PDF with a code block — the text was there (present in the text layer)
             // but rendered nearly invisible, not caught by any passing unit test since none of
             // them assert on the *color*, only on the text's presence/attributes.
-            .foregroundColor: NSColor.black,
+            .foregroundColor: PlatformColor.black,
             .backgroundColor: codeBlockBackground,
             .paragraphStyle: style,
         ]
@@ -272,7 +278,7 @@ public enum DocumentRenderer {
         // block's line into the wrong place rather than adding clean space. A real line made of
         // ordinary text has no such issue (confirmed: normal paragraph-to-paragraph spacing
         // already renders correctly), so that's what creates the gap here.
-        result.append(NSAttributedString(string: "\n", attributes: [.font: NSFont.systemFont(ofSize: 40)]))
+        result.append(NSAttributedString(string: "\n", attributes: [.font: PlatformFont.systemFont(ofSize: 40)]))
         return result
     }
 
@@ -296,7 +302,7 @@ public enum DocumentRenderer {
     /// final attributed string.
     private static func inlineParagraph(
         _ text: String,
-        baseFont: NSFont,
+        baseFont: PlatformFont,
         indent: CGFloat,
         spacingAfter: CGFloat,
         justified: Bool,
@@ -323,12 +329,7 @@ public enum DocumentRenderer {
         // the inline Markdown parse above — a **bold** run's font would otherwise get clobbered
         // back down to the plain base font.
         mutable.enumerateAttribute(.font, in: fullRange, options: []) { value, range, _ in
-            let traits = (value as? NSFont)?.fontDescriptor.symbolicTraits ?? []
-            var descriptor = baseFont.fontDescriptor
-            if !traits.isDisjoint(with: [.bold, .italic]) {
-                descriptor = descriptor.withSymbolicTraits(traits.intersection([.bold, .italic]))
-            }
-            let font = NSFont(descriptor: descriptor, size: baseFont.pointSize) ?? baseFont
+            let font = applyingPreservedBoldItalic(from: value as? PlatformFont, to: baseFont)
             mutable.addAttribute(.font, value: font, range: range)
         }
         mutable.append(NSAttributedString(string: "\n"))
@@ -487,7 +488,7 @@ public enum DocumentRenderer {
         }
         let result = NSMutableAttributedString(attributedString: attachment)
         result.append(NSAttributedString(string: "\n"))
-        result.append(NSAttributedString(string: "\n", attributes: [.font: NSFont.systemFont(ofSize: 40)]))
+        result.append(NSAttributedString(string: "\n", attributes: [.font: PlatformFont.systemFont(ofSize: 40)]))
         return result
     }
 
@@ -498,13 +499,13 @@ public enum DocumentRenderer {
     /// in the Markdown itself. Anything else (a local path, a remote URL) goes to the injected
     /// `ImageRenderer` instead, same "consumer supplies the capability that needs I/O" shape as
     /// `FormulaRenderer`.
-    private static func decodeDataURIImage(_ source: String) -> NSImage? {
+    private static func decodeDataURIImage(_ source: String) -> PlatformImage? {
         guard source.hasPrefix("data:"), let commaIndex = source.firstIndex(of: ",") else { return nil }
         let meta = source[source.index(source.startIndex, offsetBy: 5)..<commaIndex]
         guard meta.contains(";base64") else { return nil }
         let base64 = String(source[source.index(after: commaIndex)...])
         guard let data = Data(base64Encoded: base64) else { return nil }
-        return NSImage(data: data)
+        return PlatformImage(data: data)
     }
 
     /// An `.image` block's own line — scaled down (preserving aspect ratio) if it's wider than
@@ -533,7 +534,7 @@ public enum DocumentRenderer {
 
         let result = NSMutableAttributedString(attributedString: NSAttributedString(attachment: attachment))
         result.append(NSAttributedString(string: "\n"))
-        result.append(NSAttributedString(string: "\n", attributes: [.font: NSFont.systemFont(ofSize: 40)]))
+        result.append(NSAttributedString(string: "\n", attributes: [.font: PlatformFont.systemFont(ofSize: 40)]))
         return result
     }
 
@@ -544,8 +545,8 @@ public enum DocumentRenderer {
         return NSAttributedString(
             string: text + "\n",
             attributes: [
-                .font: NSFontManager.shared.convert(.systemFont(ofSize: 13), toHaveTrait: .italicFontMask),
-                .foregroundColor: NSColor.secondaryLabelColor,
+                .font: italicSystemFont(ofSize: 13),
+                .foregroundColor: PlatformColor.documentSecondaryText,
                 .paragraphStyle: style,
             ]
         )

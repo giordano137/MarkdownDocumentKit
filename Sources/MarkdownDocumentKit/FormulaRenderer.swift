@@ -8,8 +8,8 @@
 // "show the source, don't just disappear" philosophy TableRenderer already uses when a table
 // can't be laid out.
 
-#if os(macOS)
-import AppKit
+#if canImport(AppKit) || canImport(UIKit)
+import CoreGraphics
 
 public protocol FormulaRenderer {
     /// `displayMode: true` for a standalone equation (from a `.formula` block, typically
@@ -24,10 +24,10 @@ public protocol FormulaRenderer {
 /// a consumer's own SwiftMath-backed rasterizer typically already computes this (the descent of
 /// the rendered `MTMathUILabel`), so this type just carries it across the protocol boundary.
 public struct FormulaImage {
-    public let image: NSImage
+    public let image: PlatformImage
     public let descent: CGFloat
 
-    public init(image: NSImage, descent: CGFloat) {
+    public init(image: PlatformImage, descent: CGFloat) {
         self.image = image
         self.descent = descent
     }

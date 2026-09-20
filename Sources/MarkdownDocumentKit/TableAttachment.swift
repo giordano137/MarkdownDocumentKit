@@ -7,8 +7,12 @@
 // for real: actual selectable/searchable text in the PDF's content stream, not pixels. See
 // `TableRenderer.drawTable` for that path.
 
-#if os(macOS)
+#if canImport(AppKit) || canImport(UIKit)
+#if canImport(AppKit)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 import Foundation
 
 public final class TableAttachment: NSTextAttachment {

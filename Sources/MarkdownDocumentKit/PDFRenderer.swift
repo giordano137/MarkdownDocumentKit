@@ -7,8 +7,12 @@
 // handling this file works out regardless of which app is calling it, so a consumer shouldn't
 // have to reimplement this raw-CoreText dance themselves to get a real PDF out.
 
-#if os(macOS)
+#if canImport(AppKit) || canImport(UIKit)
+#if canImport(AppKit)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 import CoreText
 import Foundation
 
@@ -167,7 +171,7 @@ public enum PDFRenderer {
 
             for run in runs {
                 guard let attributes = CTRunGetAttributes(run) as? [NSAttributedString.Key: Any],
-                    let color = attributes[.backgroundColor] as? NSColor
+                    let color = attributes[.backgroundColor] as? PlatformColor
                 else { continue }
 
                 let runRange = CTRunGetStringRange(run)
@@ -222,10 +226,10 @@ public enum PDFRenderer {
                 if let table = attachment as? TableAttachment {
                     TableRenderer.drawTable(table.layout, in: context, origin: origin)
                 } else if let image = attachment.image,
-                    let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                    let cgImageValue = cgImage(from: image)
                 {
                     let imageRect = CGRect(x: origin.x, y: origin.y, width: bounds.width, height: bounds.height)
-                    context.draw(cgImage, in: imageRect)
+                    context.draw(cgImageValue, in: imageRect)
                 }
             }
         }

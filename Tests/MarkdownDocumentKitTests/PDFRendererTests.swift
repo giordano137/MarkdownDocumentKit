@@ -1,5 +1,9 @@
-#if os(macOS)
+#if canImport(AppKit) || canImport(UIKit)
+#if canImport(AppKit)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 import PDFKit
 import Testing
 @testable import MarkdownDocumentKit
@@ -16,6 +20,15 @@ import Testing
     #expect(document.pageCount == 1)
 }
 
+// `attachmentsStayInsideThePageMarginNotFlushWithTheLeftEdge` below is AppKit-only: it samples
+// individual rasterized pixels via `NSBitmapImageRep`, which has no UIKit equivalent (a raw
+// `CGImage`/`CGDataProvider` byte-offset reimplementation would be its own new source of subtle
+// bugs — premultiplied alpha, byte order, row padding — that can't be visually debugged the way
+// the AppKit version already was). The margin fix this guards lives entirely in `PDFRenderer.swift`,
+// which has no platform-specific branches at all — the same CoreText/CGContext code path runs
+// unmodified on iOS, so this one test's AppKit-only pixel check still stands in for both platforms
+// in practice, even though it can't literally run on an iOS simulator.
+#if canImport(AppKit)
 @Test func attachmentsStayInsideThePageMarginNotFlushWithTheLeftEdge() throws {
     // Regression guard for a real bug found by actually opening a generated PDF (no
     // text-content assertion can see a visual mis-position like this): `CTFrameGetLineOrigins`
@@ -59,4 +72,5 @@ import Testing
     }
     #expect(!foundInk, "Found drawn content inside the page margin — an attachment lost its horizontal margin offset")
 }
+#endif
 #endif

@@ -1,7 +1,23 @@
-#if os(macOS)
+#if canImport(AppKit) || canImport(UIKit)
+#if canImport(AppKit)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 import Testing
 @testable import MarkdownDocumentKit
+
+/// A blank image of the given size — `PlatformImage(size:)` alone already does this on AppKit; UIKit
+/// has no equivalent one-argument initializer, so this draws nothing into a real
+/// `UIGraphicsImageRenderer` context instead. Used only as a stand-in "here's an image of this
+/// size" for mock renderers below; its pixel content is never asserted on.
+private func testImage(width: CGFloat, height: CGFloat) -> PlatformImage {
+    #if canImport(AppKit)
+    return PlatformImage(size: CGSize(width: width, height: height))
+    #elseif canImport(UIKit)
+    return UIGraphicsImageRenderer(size: CGSize(width: width, height: height)).image { _ in }
+    #endif
+}
 
 /// Deterministic 1x1 image per call so tests can assert an attachment was actually produced,
 /// without depending on any real math-typesetting engine (this package has none — see README).
@@ -10,8 +26,7 @@ private struct MockFormulaRenderer: FormulaRenderer {
 
     func image(forLaTeX latex: String, displayMode: Bool, fontSize: CGFloat) -> FormulaImage? {
         guard !shouldFail else { return nil }
-        let image = NSImage(size: NSSize(width: 10, height: 10))
-        return FormulaImage(image: image, descent: 2)
+        return FormulaImage(image: testImage(width: 10, height: 10), descent: 2)
     }
 }
 
@@ -61,16 +76,16 @@ private struct MockFormulaRenderer: FormulaRenderer {
 }
 
 /// A tiny (1x1 transparent) real PNG, so tests can exercise actual image decoding rather than a
-/// synthetic `NSImage(size:)` that was never really encoded/decoded.
+/// synthetic `PlatformImage(size:)` that was never really encoded/decoded.
 private let tinyPNGBase64 =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 
 private struct MockImageRenderer: ImageRenderer {
     var shouldFail: Bool = false
 
-    func image(forSource source: String, altText: String) -> NSImage? {
+    func image(forSource source: String, altText: String) -> PlatformImage? {
         guard !shouldFail else { return nil }
-        return NSImage(size: NSSize(width: 10, height: 10))
+        return testImage(width: 10, height: 10)
     }
 }
 
@@ -108,8 +123,8 @@ private struct MockImageRenderer: ImageRenderer {
 
 @Test func imageWiderThanContentWidthIsScaledDownPreservingAspectRatio() {
     struct WideImageRenderer: ImageRenderer {
-        func image(forSource source: String, altText: String) -> NSImage? {
-            NSImage(size: NSSize(width: 2000, height: 1000))
+        func image(forSource source: String, altText: String) -> PlatformImage? {
+            testImage(width: 2000, height: 1000)
         }
     }
     let blocks: [DocumentBlock] = [.image(altText: "wide", source: "wide.png")]
@@ -119,7 +134,7 @@ private struct MockImageRenderer: ImageRenderer {
         contentWidth: 500,
         imageRenderer: WideImageRenderer()
     )
-    var attachmentSize: NSSize?
+    var attachmentSize: CGSize?
     attributed.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributed.length)) { value, _, _ in
         if let attachment = value as? NSTextAttachment { attachmentSize = attachment.bounds.size }
     }
@@ -157,12 +172,12 @@ private struct MockImageRenderer: ImageRenderer {
     let blocks: [DocumentBlock] = [.codeBlock(lines: ["let x = 1"])]
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
     let range = (attributed.string as NSString).range(of: "let x = 1")
-    let background = attributed.attribute(.backgroundColor, at: range.location, effectiveRange: nil) as? NSColor
+    let background = attributed.attribute(.backgroundColor, at: range.location, effectiveRange: nil) as? PlatformColor
     #expect(background == DocumentRenderer.codeBlockBackground)
 }
 
 @Test func codeBlockTextColorIsFixedNotDynamic() {
-    // Regression guard: this used to be the dynamic `NSColor.textColor`, which resolved to a
+    // Regression guard: this used to be the dynamic `PlatformColor.textColor`, which resolved to a
     // barely-visible near-white when `PDFRenderer` drew it into a raw CGContext with no live
     // window/appearance to resolve against — confirmed by opening an actual generated PDF, not
     // caught by `codeBlockCarriesBackgroundColorForShading` above (attribute presence and color
@@ -170,8 +185,8 @@ private struct MockImageRenderer: ImageRenderer {
     let blocks: [DocumentBlock] = [.codeBlock(lines: ["let x = 1"])]
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
     let range = (attributed.string as NSString).range(of: "let x = 1")
-    let foreground = attributed.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor
-    #expect(foreground == NSColor.black)
+    let foreground = attributed.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? PlatformColor
+    #expect(foreground == PlatformColor.black)
 }
 
 @Test func rendersBlockquoteTextItalicizedAndIndented() {
@@ -179,8 +194,12 @@ private struct MockImageRenderer: ImageRenderer {
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
     #expect(attributed.string.contains("A wise quote."))
     let range = (attributed.string as NSString).range(of: "A wise quote.")
-    let font = attributed.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+    let font = attributed.attribute(.font, at: range.location, effectiveRange: nil) as? PlatformFont
+    #if canImport(AppKit)
     #expect(font?.fontDescriptor.symbolicTraits.contains(.italic) == true)
+    #elseif canImport(UIKit)
+    #expect(font?.fontDescriptor.symbolicTraits.contains(.traitItalic) == true)
+    #endif
     let style = attributed.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle
     #expect((style?.headIndent ?? 0) > 0)
 }
@@ -192,25 +211,29 @@ private struct MockImageRenderer: ImageRenderer {
     #expect(attributed.string.contains("Careful here."))
 
     let labelRange = (attributed.string as NSString).range(of: "Warning")
-    let labelFont = attributed.attribute(.font, at: labelRange.location, effectiveRange: nil) as? NSFont
+    let labelFont = attributed.attribute(.font, at: labelRange.location, effectiveRange: nil) as? PlatformFont
+    #if canImport(AppKit)
     #expect(labelFont?.fontDescriptor.symbolicTraits.contains(.bold) == true)
-    let labelColor = attributed.attribute(.foregroundColor, at: labelRange.location, effectiveRange: nil) as? NSColor
+    #elseif canImport(UIKit)
+    #expect(labelFont?.fontDescriptor.symbolicTraits.contains(.traitBold) == true)
+    #endif
+    let labelColor = attributed.attribute(.foregroundColor, at: labelRange.location, effectiveRange: nil) as? PlatformColor
     #expect(labelColor != nil && labelColor != .black)
 
     let bodyRange = (attributed.string as NSString).range(of: "Careful here.")
-    let bodyBackground = attributed.attribute(.backgroundColor, at: bodyRange.location, effectiveRange: nil) as? NSColor
+    let bodyBackground = attributed.attribute(.backgroundColor, at: bodyRange.location, effectiveRange: nil) as? PlatformColor
     #expect(bodyBackground != nil)
     // The label itself carries no background — see `DocumentRenderer.calloutParagraph`'s doc
     // comment for why a background only as wide as the short label word would look wrong.
-    let labelBackground = attributed.attribute(.backgroundColor, at: labelRange.location, effectiveRange: nil) as? NSColor
+    let labelBackground = attributed.attribute(.backgroundColor, at: labelRange.location, effectiveRange: nil) as? PlatformColor
     #expect(labelBackground == nil)
 }
 
 @Test func differentCalloutKindsGetDifferentAccentColors() {
-    func accentColor(for kind: CalloutKind) -> NSColor? {
+    func accentColor(for kind: CalloutKind) -> PlatformColor? {
         let attributed = DocumentRenderer.attributedString(from: [.callout(kind: kind, text: "Body.")], title: "")
         let range = (attributed.string as NSString).range(of: kind.rawValue)
-        return attributed.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor
+        return attributed.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? PlatformColor
     }
     #expect(accentColor(for: .note) != accentColor(for: .tip))
     #expect(accentColor(for: .warning) != accentColor(for: .important))
