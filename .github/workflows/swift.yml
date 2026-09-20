@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  build-and-test:
-    # AppKit/CoreText-backed code (DocumentRenderer, PDFRenderer, TableRenderer) is macOS-only —
+  macos:
+    # AppKit/CoreText-backed code (DocumentRenderer, PDFRenderer, TableRenderer) is Apple-only —
     # this package can't build or run its tests on a Linux runner at all.
     runs-on: macos-15
 
@@ -23,3 +23,21 @@ jobs:
 
       - name: Test
         run: swift test
+
+  ios-simulator:
+    # DocumentRenderer/TableRenderer/PDFRenderer run on UIKit too (see README) — this is the one
+    # job that would actually catch a regression there, since `swift build`/`swift test` above
+    # only ever exercise the AppKit half. A plain `swift build` targeting the iOS SDK would only
+    # prove the code *compiles*, not that it runs correctly (the UIGraphicsImageRenderer
+    # coordinate-flip in PlatformTypes.swift is exactly the kind of bug that compiles fine but
+    # renders upside down) — only an actual Simulator test run catches that.
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show available simulators
+        run: xcrun simctl list devices available
+
+      - name: Test on iOS Simulator
+        run: xcodebuild test -scheme MarkdownDocumentKit -destination "platform=iOS Simulator,name=iPhone 16"
