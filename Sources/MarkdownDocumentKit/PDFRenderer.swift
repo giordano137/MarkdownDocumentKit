@@ -179,8 +179,14 @@ public enum PDFRenderer {
                     width: endOffset - startOffset,
                     height: ascent + descent
                 )
+                // Rounded, not a plain fill: reads as a genuine "tinted box" for a callout
+                // (README's original Phase 3 goal) rather than a flat highlight; a small enough
+                // radius that it doesn't visibly change a code block's existing rectangular look.
+                let cornerRadius: CGFloat = min(4, rect.height / 2)
+                let path = CGPath(roundedRect: rect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
                 context.setFillColor(color.cgColor)
-                context.fill(rect)
+                context.addPath(path)
+                context.fillPath()
             }
         }
     }

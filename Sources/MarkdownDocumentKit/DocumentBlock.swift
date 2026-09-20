@@ -12,6 +12,16 @@ public enum TableAlignment: Equatable {
     case none, left, center, right
 }
 
+/// GFM's "alert" convention: a blockquote whose first line is one of these four markers on its
+/// own (`> [!NOTE]`, then the body on following `>` lines). `rawValue` is the label a renderer
+/// shows verbatim (title-cased, not the all-caps marker spelling).
+public enum CalloutKind: String, Equatable {
+    case note = "Note"
+    case tip = "Tip"
+    case warning = "Warning"
+    case important = "Important"
+}
+
 /// One block-level element of a parsed document. Inline formatting (bold/italic/links) is
 /// *not* broken out here — it stays as literal Markdown inside each block's `text`/cell string,
 /// applied by whichever renderer consumes the block (see `DocumentRenderer.inlineAttributedString`
@@ -21,6 +31,11 @@ public enum DocumentBlock: Equatable {
     case heading(level: Int, text: String)
     case paragraph(text: String)
     case blockquote(text: String)
+    /// A GFM alert (`> [!NOTE]` etc.) — a blockquote whose marker line identified it as one of
+    /// the four known kinds. A plain blockquote whose first line merely *contains* `[!NOTE]`-like
+    /// text but isn't formatted as the marker convention stays `.blockquote` instead; see
+    /// `DocumentParser`'s blockquote branch for the exact check.
+    case callout(kind: CalloutKind, text: String)
     case listItem(ordered: Bool, number: Int?, level: Int, text: String)
     case codeBlock(lines: [String])
     /// `alignments.count == header.count`; every row in `rows` is padded/truncated to that same
@@ -35,8 +50,8 @@ public enum DocumentBlock: Equatable {
     /// keeps flowing with the surrounding words instead of breaking the paragraph apart.
     case formula(latex: String)
 
-    // Phase 3+: `.callout`, `.image` land here as they're implemented — every existing renderer
-    // only needs a new `case` arm added, not a rewrite.
+    // Phase 3+: `.image` lands here as it's implemented — every existing renderer only needs a
+    // new `case` arm added, not a rewrite.
 }
 
 /// Turns Markdown source into `[DocumentBlock]`. Line-oriented, not a full CommonMark
@@ -107,7 +122,14 @@ public enum DocumentParser {
                     quotedLines.append(stripped)
                     index += 1
                 }
-                blocks.append(.blockquote(text: quotedLines.joined(separator: " ")))
+                // GFM alert convention: the marker has to be the *entire* first line, not just
+                // text that happens to contain it — a real quote like "> He said [!NOTE] once."
+                // must stay a plain blockquote.
+                if let first = quotedLines.first, let kind = calloutKind(forMarkerLine: first) {
+                    blocks.append(.callout(kind: kind, text: quotedLines.dropFirst().joined(separator: " ")))
+                } else {
+                    blocks.append(.blockquote(text: quotedLines.joined(separator: " ")))
+                }
                 continue
             }
 
@@ -264,6 +286,24 @@ public enum DocumentParser {
         }
         index = min(cursor + 1, lines.count)
         return .formula(latex: formulaLines.joined(separator: "\n"))
+    }
+
+    // MARK: - Callouts
+
+    /// Matches a line that is *exactly* `[!NOTE]`/`[!TIP]`/`[!WARNING]`/`[!IMPORTANT]` (case
+    /// insensitive — a model writing `[!Note]` shouldn't fall back to a plain, unstyled
+    /// blockquote just for that), with no other content on the line.
+    private static func calloutKind(forMarkerLine line: String) -> CalloutKind? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("[!"), trimmed.hasSuffix("]") else { return nil }
+        let name = trimmed.dropFirst(2).dropLast(1).uppercased()
+        switch name {
+        case "NOTE": return .note
+        case "TIP": return .tip
+        case "WARNING": return .warning
+        case "IMPORTANT": return .important
+        default: return nil
+        }
     }
 
     private static func normalizedRow(_ row: [String], toWidth width: Int) -> [String] {

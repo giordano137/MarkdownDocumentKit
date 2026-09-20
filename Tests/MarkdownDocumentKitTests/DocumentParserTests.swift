@@ -67,6 +67,35 @@ import Testing
     )
 }
 
+@Test func parsesCalloutMarkerAsItsKind() {
+    for (marker, kind) in [("NOTE", CalloutKind.note), ("TIP", .tip), ("WARNING", .warning), ("IMPORTANT", .important)] {
+        let blocks = DocumentParser.parse("> [!\(marker)]\n> Body text.")
+        #expect(blocks == [.callout(kind: kind, text: "Body text.")])
+    }
+}
+
+@Test func calloutMarkerMatchingIsCaseInsensitive() {
+    let blocks = DocumentParser.parse("> [!note]\n> Body text.")
+    #expect(blocks == [.callout(kind: .note, text: "Body text.")])
+}
+
+@Test func joinsMultipleCalloutBodyLines() {
+    let blocks = DocumentParser.parse("> [!TIP]\n> Line one.\n> Line two.")
+    #expect(blocks == [.callout(kind: .tip, text: "Line one. Line two.")])
+}
+
+@Test func quoteContainingMarkerTextButNotAsWholeLineStaysAPlainBlockquote() {
+    // The marker has to be the *entire* first line — a real quote that merely mentions the
+    // bracketed text inline must not be reinterpreted as a callout.
+    let blocks = DocumentParser.parse("> He said [!NOTE] once, oddly.")
+    #expect(blocks == [.blockquote(text: "He said [!NOTE] once, oddly.")])
+}
+
+@Test func unknownBracketMarkerStaysAPlainBlockquote() {
+    let blocks = DocumentParser.parse("> [!UNKNOWN]\n> Body text.")
+    #expect(blocks == [.blockquote(text: "[!UNKNOWN] Body text.")])
+}
+
 @Test func parsesSingleLineDisplayFormula() {
     let blocks = DocumentParser.parse("\\[E = mc^2\\]")
     #expect(blocks == [.formula(latex: "E = mc^2")])

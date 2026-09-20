@@ -40,6 +40,9 @@ public enum DocumentRenderer {
             case .blockquote(let text):
                 result.append(blockquoteParagraph(text, formulaRenderer: formulaRenderer))
 
+            case .callout(let kind, let text):
+                result.append(calloutParagraph(kind: kind, text: text, formulaRenderer: formulaRenderer))
+
             case .listItem(let ordered, let number, let level, let text):
                 let bullet = ordered ? "\(number ?? 1).  " : "\(bulletCharacter(forLevel: level))  "
                 result.append(listParagraph(bullet + text, level: level, formulaRenderer: formulaRenderer))
@@ -120,6 +123,69 @@ public enum DocumentRenderer {
         let fullRange = NSRange(location: 0, length: mutable.length)
         mutable.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: fullRange)
         return mutable
+    }
+
+    // MARK: - Callouts
+
+    /// Fixed light tint + a matching darker accent for the label text, per GFM alert kind — fixed
+    /// rather than dynamic for the same reason `codeBlockBackground` already is (an exported file
+    /// has no live theme to resolve dynamic colors against).
+    private static func calloutTint(for kind: CalloutKind) -> (background: NSColor, accent: NSColor) {
+        switch kind {
+        case .note:
+            return (NSColor(red: 0.90, green: 0.95, blue: 1.0, alpha: 1), NSColor(red: 0.16, green: 0.40, blue: 0.85, alpha: 1))
+        case .tip:
+            return (NSColor(red: 0.89, green: 0.97, blue: 0.90, alpha: 1), NSColor(red: 0.16, green: 0.55, blue: 0.28, alpha: 1))
+        case .warning:
+            return (NSColor(red: 1.0, green: 0.95, blue: 0.82, alpha: 1), NSColor(red: 0.70, green: 0.48, blue: 0.05, alpha: 1))
+        case .important:
+            return (NSColor(red: 0.95, green: 0.90, blue: 1.0, alpha: 1), NSColor(red: 0.50, green: 0.20, blue: 0.75, alpha: 1))
+        }
+    }
+
+    /// A GFM alert (`> [!NOTE]` etc.): a bold, accent-colored label line, then the body text
+    /// tinted via a `.backgroundColor` attribute — the same mechanism `codeBlockBackground`
+    /// already uses, so no new PDF/DOCX-side handling is needed (`PDFRenderer` paints it manually
+    /// with rounded corners; DOCX's OOXML writer picks up `.backgroundColor` as text shading
+    /// automatically). The label itself carries no background: it's typically much shorter than
+    /// the body, and a `.backgroundColor` run only ever paints as wide as its own glyphs (real
+    /// here, and already true of `codeBlockBackground`) — tinting just the word "Note" would read
+    /// as an odd narrow highlight rather than a label sitting inside a wider box. No icon glyph
+    /// either: an emoji/symbol character risks rendering oddly through `PDFRenderer`'s raw
+    /// CoreText text-showing operators, which color-glyph fonts don't always cooperate with, so a
+    /// plain text label is the robust choice.
+    private static func calloutParagraph(kind: CalloutKind, text: String, formulaRenderer: FormulaRenderer?) -> NSAttributedString {
+        let (background, accent) = calloutTint(for: kind)
+        let result = NSMutableAttributedString()
+
+        let labelStyle = NSMutableParagraphStyle()
+        labelStyle.firstLineHeadIndent = 18
+        labelStyle.headIndent = 18
+        labelStyle.paragraphSpacing = 2
+        result.append(
+            NSAttributedString(
+                string: kind.rawValue + "\n",
+                attributes: [
+                    .font: NSFont.boldSystemFont(ofSize: 13),
+                    .foregroundColor: accent,
+                    .paragraphStyle: labelStyle,
+                ]
+            )
+        )
+
+        let body = inlineParagraph(
+            text,
+            baseFont: .systemFont(ofSize: 13),
+            indent: 18,
+            spacingAfter: 8,
+            justified: true,
+            formulaRenderer: formulaRenderer
+        )
+        let mutableBody = NSMutableAttributedString(attributedString: body)
+        mutableBody.addAttribute(.backgroundColor, value: background, range: NSRange(location: 0, length: mutableBody.length))
+        result.append(mutableBody)
+
+        return result
     }
 
     // MARK: - Lists

@@ -105,6 +105,38 @@ private struct MockFormulaRenderer: FormulaRenderer {
     #expect((style?.headIndent ?? 0) > 0)
 }
 
+@Test func rendersCalloutLabelInBoldAccentColorAboveTintedBody() {
+    let blocks: [DocumentBlock] = [.callout(kind: .warning, text: "Careful here.")]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+    #expect(attributed.string.contains("Warning"))
+    #expect(attributed.string.contains("Careful here."))
+
+    let labelRange = (attributed.string as NSString).range(of: "Warning")
+    let labelFont = attributed.attribute(.font, at: labelRange.location, effectiveRange: nil) as? NSFont
+    #expect(labelFont?.fontDescriptor.symbolicTraits.contains(.bold) == true)
+    let labelColor = attributed.attribute(.foregroundColor, at: labelRange.location, effectiveRange: nil) as? NSColor
+    #expect(labelColor != nil && labelColor != .black)
+
+    let bodyRange = (attributed.string as NSString).range(of: "Careful here.")
+    let bodyBackground = attributed.attribute(.backgroundColor, at: bodyRange.location, effectiveRange: nil) as? NSColor
+    #expect(bodyBackground != nil)
+    // The label itself carries no background — see `DocumentRenderer.calloutParagraph`'s doc
+    // comment for why a background only as wide as the short label word would look wrong.
+    let labelBackground = attributed.attribute(.backgroundColor, at: labelRange.location, effectiveRange: nil) as? NSColor
+    #expect(labelBackground == nil)
+}
+
+@Test func differentCalloutKindsGetDifferentAccentColors() {
+    func accentColor(for kind: CalloutKind) -> NSColor? {
+        let attributed = DocumentRenderer.attributedString(from: [.callout(kind: kind, text: "Body.")], title: "")
+        let range = (attributed.string as NSString).range(of: kind.rawValue)
+        return attributed.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor
+    }
+    #expect(accentColor(for: .note) != accentColor(for: .tip))
+    #expect(accentColor(for: .warning) != accentColor(for: .important))
+    #expect(accentColor(for: .note) != accentColor(for: .warning))
+}
+
 @Test func bodyParagraphsAreJustifiedAndHyphenated() {
     let blocks: [DocumentBlock] = [.paragraph(text: "Some body text.")]
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
