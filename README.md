@@ -52,8 +52,29 @@ the only glue code a consumer needs to add math/images on top).
 
 - [x] Phase 1: block layout core — headings, paragraphs (justified,
       hyphenated), lists, fenced code blocks. `DocumentBlock`/`DocumentParser`
-      (platform-agnostic) + `DocumentRenderer` (macOS/AppKit; UIKit renderer
-      not implemented yet, model doesn't block it).
+      are pure Foundation; `DocumentRenderer`/`TableRenderer`/`PDFRenderer`
+      run on **both AppKit (macOS) and UIKit (iOS)** from one shared
+      implementation, via the `PlatformFont`/`PlatformColor`/`PlatformImage`
+      typealiases and a handful of helpers in `PlatformTypes.swift` for the
+      genuine API divergences (italic font conversion, bold/italic trait
+      constant names, offscreen bitmap-context creation). Cell/document text
+      is drawn with raw CoreText (`CTFramesetter`+`CTFrameDraw`) rather than
+      `NSAttributedString.draw(with:)`, specifically so it isn't tied to
+      UIKit's own top-left/y-down drawing convention — a PDF page's CGContext
+      is natively bottom-left/y-up (the PDF spec's convention, not an OS
+      choice), so text drawn through that convenience API would come out
+      flipped on iOS. Verified end-to-end on iOS, not just cross-compiled:
+      full test suite green on a real iOS Simulator run
+      (`xcodebuild test -destination 'platform=iOS Simulator,...'`), plus a
+      `TableRenderer.render` bitmap saved from that same simulator run and
+      opened directly to confirm it isn't upside down (the specific risk a
+      `UIGraphicsImageRenderer`-vs-`NSGraphicsContext` coordinate-space
+      mismatch would cause). One test (`attachmentsStayInsideThePageMarginNotFlushWithTheLeftEdge`,
+      a pixel-level regression guard) stays AppKit-only — it samples raw
+      pixels via `NSBitmapImageRep`, which has no UIKit equivalent short of
+      a `CGImage`/`CGDataProvider` byte-offset reimplementation; the margin
+      fix it guards lives in unbranched shared code, so this one gap is
+      narrow.
 - [x] Phase 2: table layout — column widths (measured, then scaled to fit),
       wrapped row heights, borders, header shading, alignment, inline
       Markdown per cell (`TableRenderer.computeLayout`/`TableLayout`).
