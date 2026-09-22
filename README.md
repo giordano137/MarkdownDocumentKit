@@ -1,5 +1,6 @@
 # MarkdownDocumentKit
 
+![Build Status](https://github.com/giordano137/MarkdownDocumentKit/actions/workflows/swift.yml/badge.svg)
 ![Swift 5.10+](https://img.shields.io/badge/swift-5.10%2B-F05138?logo=swift&logoColor=white)
 ![Platforms: macOS 14+ | iOS 17+](https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20iOS%2017%2B-lightgrey)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
