@@ -73,4 +73,68 @@ import Testing
     #expect(!foundInk, "Found drawn content inside the page margin — an attachment lost its horizontal margin offset")
 }
 #endif
+
+@Test func paginatesLongContentAcrossMultiplePagesWithoutLosingOrDuplicatingText() throws {
+    // Regression guard for the actual page-break loop in PDFRenderer.render: `location +=
+    // visibleRange.length` advancing by the wrong amount would either re-draw the tail of one
+    // page again at the top of the next (duplication) or skip text that fell exactly on the
+    // boundary (loss) — neither of which `rendersAValidSinglePagePDFForATable` above can catch,
+    // since that test only ever produces one page. Each paragraph is a short, unique, single-word
+    // token specifically so line-wrapping/hyphenation can't fracture it across a PDFKit text
+    // extraction, which would otherwise look like data loss that isn't really there.
+    let markerCount = 200
+    let markers = (1...markerCount).map { String(format: "Marker%04d", $0) }
+    let markdown = markers.map { "\($0)." }.joined(separator: "\n\n")
+    let attributed = DocumentRenderer.attributedString(from: DocumentParser.parse(markdown), title: "Test")
+    let data = try PDFRenderer.render(attributed)
+
+    guard let document = PDFDocument(data: data) else {
+        Issue.record("PDFRenderer produced data PDFDocument couldn't parse")
+        return
+    }
+    #expect(document.pageCount > 1, "Expected enough content to force a page break, got \(document.pageCount) page(s)")
+
+    var extracted: [String] = []
+    for pageIndex in 0..<document.pageCount {
+        guard let page = document.page(at: pageIndex), let pageText = page.string else { continue }
+        let regex = try NSRegularExpression(pattern: "Marker\\d{4}")
+        let nsRange = NSRange(location: 0, length: (pageText as NSString).length)
+        regex.enumerateMatches(in: pageText, range: nsRange) { match, _, _ in
+            guard let match, let range = Range(match.range, in: pageText) else { return }
+            extracted.append(String(pageText[range]))
+        }
+    }
+
+    #expect(extracted == markers, "Extracted markers diverged from source — a page break duplicated or dropped text")
+}
+
+#if canImport(AppKit)
+@Test func tableNearPageBoundaryLandsWhollyOnOnePageRatherThanBeingSplit() throws {
+    // A `TableAttachment` rides through the pagination loop as a single atomic CTRun (see
+    // `withAttachmentSizingDelegates`) — CoreText line-breaking can't split a run mid-glyph, so a
+    // table that doesn't fully fit on the current page should move whole to the next one rather
+    // than being cut in half. Padding the markdown with enough filler paragraphs to land the
+    // table right at a page boundary is what actually exercises that, unlike the single-page
+    // table tests elsewhere which never get near an edge at all.
+    let filler = (1...60).map { "Fuellzeile \($0)." }.joined(separator: "\n\n")
+    let markdown = filler + "\n\n| A | B |\n| --- | --- |\n| eins | zwei |\n| drei | vier |"
+    let attributed = DocumentRenderer.attributedString(from: DocumentParser.parse(markdown), title: "Test")
+    let data = try PDFRenderer.render(attributed)
+
+    guard let document = PDFDocument(data: data) else {
+        Issue.record("PDFRenderer produced data PDFDocument couldn't parse")
+        return
+    }
+
+    var pagesContainingTableText: [Int] = []
+    for pageIndex in 0..<document.pageCount {
+        guard let page = document.page(at: pageIndex), let pageText = page.string else { continue }
+        if pageText.contains("eins") || pageText.contains("zwei") || pageText.contains("drei") || pageText.contains("vier") {
+            pagesContainingTableText.append(pageIndex)
+        }
+    }
+
+    #expect(pagesContainingTableText.count == 1, "Table cell text appeared on \(pagesContainingTableText.count) pages instead of exactly one — the table may have been split across a page break")
+}
+#endif
 #endif
