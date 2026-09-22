@@ -48,7 +48,10 @@ dependency. No renderer supplied, or one that can't parse a given diagram,
 falls back to the raw Mermaid source shown as a code block — deliberately
 *not* an attempt at a hand-rolled ASCII approximation of the diagram, same
 "show the source, don't fake it" reasoning `FormulaRenderer`/`ImageRenderer`
-already use.
+already use. The hook also carries a `DiagramPalette` (the active theme's
+colors) alongside the source, so a consumer's Mermaid integration can match
+the rendered diagram to the rest of the document's colors instead of
+Mermaid's own unrelated stock theme — see "Styling is injected too" below.
 
 ## Styling is injected too — bring your own brand
 
@@ -202,13 +205,34 @@ code a consumer needs to add math/images/diagrams on top, and a
       fenced language is untouched. Rendered exactly like `.image` once an
       image exists — same content-width scaling, same "never scaled up"
       rule, same shared `scaledImageAttachmentParagraph` helper — the only
-      difference is *getting* that image, via `DiagramRenderer.image(forMermaidSource:)`
-      instead of `ImageRenderer.image(forSource:altText:)`. No renderer, or
-      one that returns `nil` for a given diagram, falls back to the raw
-      Mermaid source rendered as a code block (reusing `codeParagraph`'s own
+      difference is *getting* that image, via
+      `DiagramRenderer.image(forMermaidSource:palette:)` instead of
+      `ImageRenderer.image(forSource:altText:)`. No renderer, or one that
+      returns `nil` for a given diagram, falls back to the raw Mermaid
+      source rendered as a code block (reusing `codeParagraph`'s own
       styling) — deliberately not a hand-rolled ASCII-art attempt at the
       diagram, which would risk looking like a real (but wrong) rendering
       rather than an honest "this needs a renderer" fallback.
+
+      `palette` (the active theme's `diagramPalette`, four colors: node
+      background/border, line color, text color) exists because a real
+      rendered Mermaid diagram otherwise looks like it was pasted in from a
+      different tool — Mermaid's own stock theme has no relationship to
+      whatever colors the rest of the document uses (confirmed visually:
+      side-by-side renders of the same diagram with Mermaid's default purple
+      vs. `%%{init: {'theme':'base', 'themeVariables': {...}}}%%` fed from
+      `diagramPalette` were the difference between "looks bolted on" and
+      "looks like one document"). This package still knows nothing about
+      Mermaid's specific init-directive syntax — `DiagramPalette` is just
+      plain color data crossing the protocol boundary, the same shape
+      `CalloutTint` already uses; turning that into a `%%{init}%%` string
+      (or whatever a different diagramming backend's own theming hook looks
+      like) is entirely the consumer's `DiagramRenderer` implementation's
+      job. No font field on `DiagramPalette` for the same reason
+      `DocumentTheme` itself has none — see its top-of-file comment — and no
+      font-*size* field either: unlike `FormulaRenderer`'s `fontSize`, a
+      diagram never has to sit on a shared baseline with surrounding text,
+      so its internal sizing stays the diagramming library's own concern.
 
 ## Requirements
 

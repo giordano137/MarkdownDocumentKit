@@ -91,8 +91,10 @@ private struct MockImageRenderer: ImageRenderer {
 
 private struct MockDiagramRenderer: DiagramRenderer {
     var shouldFail: Bool = false
+    var capturedPalette: (DiagramPalette) -> Void = { _ in }
 
-    func image(forMermaidSource source: String) -> PlatformImage? {
+    func image(forMermaidSource source: String, palette: DiagramPalette) -> PlatformImage? {
+        capturedPalette(palette)
         guard !shouldFail else { return nil }
         return testImage(width: 10, height: 10)
     }
@@ -178,6 +180,26 @@ private struct MockDiagramRenderer: DiagramRenderer {
     let blocks: [DocumentBlock] = [.diagram(source: "graph TD\nA --> B")]
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "", diagramRenderer: MockDiagramRenderer(shouldFail: true))
     #expect(attributed.string.contains("graph TD"))
+}
+
+@Test func mermaidDiagramRendererReceivesTheActiveThemesDiagramPalette() {
+    // The whole point of passing a DiagramPalette at all: a consumer's DiagramRenderer should be
+    // able to color a rendered diagram to match the rest of the document (e.g. via a Mermaid
+    // %%{init}%% directive) without separately hardcoding a palette of its own. This just guards
+    // that the palette which actually reaches the renderer is the active theme's, not some
+    // unrelated default.
+    var theme = DocumentTheme.default
+    theme.diagramPalette = DiagramPalette(nodeBackground: .red, nodeBorder: .green, lineColor: .blue, textColor: .yellow)
+
+    var received: DiagramPalette?
+    let renderer = MockDiagramRenderer(capturedPalette: { received = $0 })
+    let blocks: [DocumentBlock] = [.diagram(source: "graph TD\nA --> B")]
+    _ = DocumentRenderer.attributedString(from: blocks, title: "", theme: theme, diagramRenderer: renderer)
+
+    #expect(received?.nodeBackground == .red)
+    #expect(received?.nodeBorder == .green)
+    #expect(received?.lineColor == .blue)
+    #expect(received?.textColor == .yellow)
 }
 
 @Test func rendersTitleAndHeadingText() {

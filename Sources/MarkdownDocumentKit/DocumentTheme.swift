@@ -41,6 +41,10 @@ public struct DocumentTheme {
     /// asides, not primary content.
     public var secondaryText: PlatformColor
     public var calloutTints: [CalloutKind: CalloutTint]
+    /// Handed to a `DiagramRenderer` alongside a `.diagram` block's Mermaid source — see
+    /// `DiagramPalette`'s own doc comment for why colors are what crosses that boundary, never a
+    /// font.
+    public var diagramPalette: DiagramPalette
 
     // MARK: - Font sizes (system font family — see this file's top-of-file comment)
 
@@ -83,6 +87,7 @@ public struct DocumentTheme {
         tableText: PlatformColor,
         secondaryText: PlatformColor,
         calloutTints: [CalloutKind: CalloutTint],
+        diagramPalette: DiagramPalette,
         titleFontSize: CGFloat,
         headingFontSizes: [CGFloat],
         bodyFontSize: CGFloat,
@@ -111,6 +116,7 @@ public struct DocumentTheme {
         self.tableText = tableText
         self.secondaryText = secondaryText
         self.calloutTints = calloutTints
+        self.diagramPalette = diagramPalette
         self.titleFontSize = titleFontSize
         self.headingFontSizes = headingFontSizes
         self.bodyFontSize = bodyFontSize
@@ -161,6 +167,15 @@ public struct DocumentTheme {
                 accent: PlatformColor(red: 0.50, green: 0.20, blue: 0.75, alpha: 1)
             ),
         ],
+        // Matches .note's tint on purpose — a coherent default for a consumer that wires this
+        // straight into Mermaid's themeVariables without picking its own colors first, rather than
+        // Mermaid's own stock purple, which doesn't relate to anything else in this theme.
+        diagramPalette: DiagramPalette(
+            nodeBackground: PlatformColor(red: 0.90, green: 0.95, blue: 1.0, alpha: 1),
+            nodeBorder: PlatformColor(red: 0.16, green: 0.40, blue: 0.85, alpha: 1),
+            lineColor: PlatformColor(white: 0.42, alpha: 1),
+            textColor: .black
+        ),
         titleFontSize: 22,
         headingFontSizes: [20, 18, 16, 14, 13, 12],
         bodyFontSize: 13,

@@ -607,7 +607,7 @@ public enum DocumentRenderer {
         theme: DocumentTheme,
         diagramRenderer: DiagramRenderer?
     ) -> NSAttributedString {
-        guard let image = diagramRenderer?.image(forMermaidSource: source) else {
+        guard let image = diagramRenderer?.image(forMermaidSource: source, palette: theme.diagramPalette) else {
             return codeParagraph(source.components(separatedBy: "\n"), theme: theme)
         }
         return scaledImageAttachmentParagraph(image, contentWidth: contentWidth)
