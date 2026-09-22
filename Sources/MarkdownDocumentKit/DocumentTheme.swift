@@ -184,9 +184,19 @@ public struct DocumentTheme {
     )
 
     /// Falls back to `.default`'s tint for a kind the caller's `calloutTints` dictionary doesn't
-    /// cover — a consumer overriding just one or two kinds shouldn't have to supply all four.
+    /// cover — a consumer overriding just one or two kinds shouldn't have to supply all four. The
+    /// second fallback (`neutralFallbackTint`) only matters if `.default` itself is ever missing a
+    /// case — e.g. a new `CalloutKind` added without a matching `.default.calloutTints` entry —
+    /// and exists so that gap degrades to a generic gray tint instead of a crash (this used to be
+    /// a force-unwrap on the `.default` lookup). `DocumentThemeTests.defaultThemeSuppliesATintForEveryCalloutKind`
+    /// is what actually catches that gap, by iterating `CalloutKind.allCases`.
     func calloutTint(for kind: CalloutKind) -> CalloutTint {
-        calloutTints[kind] ?? DocumentTheme.default.calloutTints[kind]!
+        calloutTints[kind] ?? DocumentTheme.default.calloutTints[kind] ?? DocumentTheme.neutralFallbackTint
     }
+
+    private static let neutralFallbackTint = CalloutTint(
+        background: PlatformColor(white: 0.93, alpha: 1),
+        accent: PlatformColor(white: 0.35, alpha: 1)
+    )
 }
 #endif

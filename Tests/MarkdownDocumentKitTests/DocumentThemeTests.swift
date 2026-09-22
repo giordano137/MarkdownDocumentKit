@@ -112,4 +112,24 @@ import Testing
     #expect(theme.bodyFontSize == 13)
     #expect(theme.indentUnit == 18)
 }
+
+@Test func defaultThemeSuppliesATintForEveryCalloutKind() {
+    // `calloutTint(for:)` falls back to `DocumentTheme.default.calloutTints[kind]` for any kind
+    // a caller's own theme doesn't cover — that fallback used to be a force-unwrap, so a new
+    // `CalloutKind` case added without a matching entry here would have crashed at render time
+    // instead of failing this test. Iterating `CalloutKind.allCases` (not a hardcoded list of the
+    // four current kinds) is what makes this actually catch that when a case is added later.
+    for kind in CalloutKind.allCases {
+        #expect(DocumentTheme.default.calloutTints[kind] != nil, "DocumentTheme.default.calloutTints is missing an entry for \(kind)")
+    }
+}
+
+@Test func calloutTintFallsBackToDefaultThemeForAnUncoveredKind() {
+    var theme = DocumentTheme.default
+    theme.calloutTints = [.note: DocumentTheme.CalloutTint(background: .red, accent: .green)]
+
+    let tipTint = theme.calloutTint(for: .tip)
+    #expect(tipTint.background == DocumentTheme.default.calloutTints[.tip]?.background)
+    #expect(tipTint.accent == DocumentTheme.default.calloutTints[.tip]?.accent)
+}
 #endif

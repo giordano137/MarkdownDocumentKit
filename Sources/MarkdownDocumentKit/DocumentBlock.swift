@@ -15,7 +15,7 @@ public enum TableAlignment: Equatable {
 /// GFM's "alert" convention: a blockquote whose first line is one of these four markers on its
 /// own (`> [!NOTE]`, then the body on following `>` lines). `rawValue` is the label a renderer
 /// shows verbatim (title-cased, not the all-caps marker spelling).
-public enum CalloutKind: String, Hashable {
+public enum CalloutKind: String, Hashable, CaseIterable {
     case note = "Note"
     case tip = "Tip"
     case warning = "Warning"
