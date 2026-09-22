@@ -23,6 +23,7 @@ touched up.*
 ## Quick start
 
 ```swift
+import Foundation
 import MarkdownDocumentKit
 
 let markdown = """
