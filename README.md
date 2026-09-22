@@ -10,6 +10,16 @@ embedded images — and renders the result to PDF, DOCX, or a plain
 `NSAttributedString`, without a browser engine or an external typesetting
 binary.
 
+![A generated PDF page with a heading, a blue Note callout, a table, a Mermaid diagram themed to match, and an orange Warning callout](docs/screenshot.png)
+
+*A real `PDFRenderer.render` output — heading, table, and both callout
+boxes need zero configuration (see "Quick start" below); the diagram
+needs an injected `DiagramRenderer`, here one that maps `DiagramPalette`
+into Mermaid's own theming hook so it matches the callouts' colors
+instead of Mermaid's unrelated stock purple (see "Injecting math, images,
+and diagrams" below). Nothing in this screenshot is hand-drawn or
+touched up.*
+
 ## Quick start
 
 ```swift
@@ -192,6 +202,16 @@ done and in real production use by a consuming app's document-export
 feature. For the implementation history and design rationale behind each
 piece — including the real bugs that shaped it — see
 [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Versioning
+
+Tagged releases follow [SemVer](https://semver.org). Currently pre-1.0
+(`0.x`) — per SemVer's own convention, that means a breaking API change
+(a protocol's required method signature changing, a public type's fields
+changing) can still land in a minor bump, not necessarily a major one.
+`DiagramRenderer.image(forMermaidSource:)` gaining a required `palette`
+parameter is exactly that kind of change. Once this reaches `1.0.0`, a
+breaking change becomes a major bump.
 
 ## Requirements
 
