@@ -36,7 +36,8 @@ public enum DocumentRenderer {
         contentWidth: CGFloat = defaultContentWidth,
         theme: DocumentTheme = .default,
         formulaRenderer: FormulaRenderer? = nil,
-        imageRenderer: ImageRenderer? = nil
+        imageRenderer: ImageRenderer? = nil,
+        diagramRenderer: DiagramRenderer? = nil
     ) -> NSAttributedString {
         let result = NSMutableAttributedString()
         result.append(styledTitle(title, theme: theme))
@@ -73,6 +74,11 @@ public enum DocumentRenderer {
             case .image(let altText, let source):
                 result.append(
                     imageParagraph(altText: altText, source: source, contentWidth: contentWidth, theme: theme, imageRenderer: imageRenderer)
+                )
+
+            case .diagram(let source):
+                result.append(
+                    diagramParagraph(source: source, contentWidth: contentWidth, theme: theme, diagramRenderer: diagramRenderer)
                 )
             }
         }
@@ -534,19 +540,7 @@ public enum DocumentRenderer {
         guard let image = decodeDataURIImage(source) ?? imageRenderer?.image(forSource: source, altText: altText) else {
             return missingImageParagraph(altText: altText, theme: theme)
         }
-
-        let naturalSize = image.size
-        let scale = naturalSize.width > contentWidth ? contentWidth / naturalSize.width : 1
-        let displaySize = CGSize(width: naturalSize.width * scale, height: naturalSize.height * scale)
-
-        let attachment = NSTextAttachment()
-        attachment.image = image
-        attachment.bounds = CGRect(origin: .zero, size: displaySize)
-
-        let result = NSMutableAttributedString(attributedString: NSAttributedString(attachment: attachment))
-        result.append(NSAttributedString(string: "\n"))
-        result.append(NSAttributedString(string: "\n", attributes: [.font: PlatformFont.systemFont(ofSize: 40)]))
-        return result
+        return scaledImageAttachmentParagraph(image, contentWidth: contentWidth)
     }
 
     private static func missingImageParagraph(altText: String, theme: DocumentTheme) -> NSAttributedString {
@@ -561,6 +555,45 @@ public enum DocumentRenderer {
                 .paragraphStyle: style,
             ]
         )
+    }
+
+    /// Scales `image` down (preserving aspect ratio) if it's wider than the page's content width,
+    /// never scaled up, and wraps it as a standalone-paragraph `NSTextAttachment` — the shared tail
+    /// end of both `imageParagraph` and `diagramParagraph`, since a rendered diagram is laid out on
+    /// the page exactly like any other block-level image once it exists as a `PlatformImage`.
+    private static func scaledImageAttachmentParagraph(_ image: PlatformImage, contentWidth: CGFloat) -> NSAttributedString {
+        let naturalSize = image.size
+        let scale = naturalSize.width > contentWidth ? contentWidth / naturalSize.width : 1
+        let displaySize = CGSize(width: naturalSize.width * scale, height: naturalSize.height * scale)
+
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        attachment.bounds = CGRect(origin: .zero, size: displaySize)
+
+        let result = NSMutableAttributedString(attributedString: NSAttributedString(attachment: attachment))
+        result.append(NSAttributedString(string: "\n"))
+        result.append(NSAttributedString(string: "\n", attributes: [.font: PlatformFont.systemFont(ofSize: 40)]))
+        return result
+    }
+
+    // MARK: - Diagrams
+
+    /// A fenced ` ```mermaid ` block: rendered as an image via the injected `DiagramRenderer`
+    /// exactly like `.image` is via `ImageRenderer` (see `scaledImageAttachmentParagraph`). Without
+    /// a renderer, or one that can't parse this particular Mermaid source, falls back to the raw
+    /// source shown as a code block — reusing `codeParagraph`'s own styling rather than attempting
+    /// any kind of ASCII-art approximation of the diagram, which would risk looking like a real
+    /// (but wrong) rendering rather than an honest "this needs a renderer" fallback.
+    private static func diagramParagraph(
+        source: String,
+        contentWidth: CGFloat,
+        theme: DocumentTheme,
+        diagramRenderer: DiagramRenderer?
+    ) -> NSAttributedString {
+        guard let image = diagramRenderer?.image(forMermaidSource: source) else {
+            return codeParagraph(source.components(separatedBy: "\n"), theme: theme)
+        }
+        return scaledImageAttachmentParagraph(image, contentWidth: contentWidth)
     }
 }
 #endif

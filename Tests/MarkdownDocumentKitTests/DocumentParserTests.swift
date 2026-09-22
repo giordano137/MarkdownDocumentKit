@@ -156,6 +156,24 @@ import Testing
     #expect(blocks == [.codeBlock(lines: ["leftover line"])])
 }
 
+@Test func parsesMermaidFencedBlockAsDiagramNotCodeBlock() {
+    let markdown = "```mermaid\ngraph TD\nA --> B\n```"
+    let blocks = DocumentParser.parse(markdown)
+    #expect(blocks == [.diagram(source: "graph TD\nA --> B")])
+}
+
+@Test func mermaidLanguageTagMatchingIsCaseInsensitive() {
+    let markdown = "```Mermaid\ngraph TD\nA --> B\n```"
+    let blocks = DocumentParser.parse(markdown)
+    #expect(blocks == [.diagram(source: "graph TD\nA --> B")])
+}
+
+@Test func nonMermaidFencedLanguageStaysAPlainCodeBlock() {
+    let markdown = "```swift\nlet x = 1\n```"
+    let blocks = DocumentParser.parse(markdown)
+    #expect(blocks == [.codeBlock(lines: ["let x = 1"])])
+}
+
 @Test func parsesSimpleTableWithAlignments() {
     let markdown = """
         | Left | Center | Right |

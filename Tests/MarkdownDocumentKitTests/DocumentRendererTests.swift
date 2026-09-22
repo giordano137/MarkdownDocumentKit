@@ -89,6 +89,15 @@ private struct MockImageRenderer: ImageRenderer {
     }
 }
 
+private struct MockDiagramRenderer: DiagramRenderer {
+    var shouldFail: Bool = false
+
+    func image(forMermaidSource source: String) -> PlatformImage? {
+        guard !shouldFail else { return nil }
+        return testImage(width: 10, height: 10)
+    }
+}
+
 @Test func imageWithDataURISourceDecodesWithoutAnyRendererSupplied() {
     let blocks: [DocumentBlock] = [.image(altText: "dot", source: "data:image/png;base64,\(tinyPNGBase64)")]
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
@@ -140,6 +149,35 @@ private struct MockImageRenderer: ImageRenderer {
     }
     #expect(attachmentSize?.width == 500)
     #expect(attachmentSize?.height == 250)
+}
+
+@Test func mermaidDiagramRendersAsAttachmentWhenRendererSupplied() {
+    let blocks: [DocumentBlock] = [.diagram(source: "graph TD\nA --> B")]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "", diagramRenderer: MockDiagramRenderer())
+    var foundAttachment = false
+    attributed.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributed.length)) { value, _, _ in
+        if value is NSTextAttachment { foundAttachment = true }
+    }
+    #expect(foundAttachment)
+    #expect(!attributed.string.contains("graph TD"))
+}
+
+@Test func mermaidDiagramFallsBackToRawSourceAsCodeBlockWithoutARenderer() {
+    let blocks: [DocumentBlock] = [.diagram(source: "graph TD\nA --> B")]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+    #expect(attributed.string.contains("graph TD"))
+    #expect(attributed.string.contains("A --> B"))
+    var foundAttachment = false
+    attributed.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributed.length)) { value, _, _ in
+        if value is NSTextAttachment { foundAttachment = true }
+    }
+    #expect(!foundAttachment)
+}
+
+@Test func mermaidDiagramFallsBackWhenInjectedRendererCannotParseIt() {
+    let blocks: [DocumentBlock] = [.diagram(source: "graph TD\nA --> B")]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "", diagramRenderer: MockDiagramRenderer(shouldFail: true))
+    #expect(attributed.string.contains("graph TD"))
 }
 
 @Test func rendersTitleAndHeadingText() {

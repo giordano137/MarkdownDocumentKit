@@ -37,11 +37,18 @@ backed by SwiftMath for single equations and
 chemistry notation) — so a consumer that doesn't care about math isn't
 forced to pull in a math-typesetting stack just to lay out a table.
 
-Diagrams (Mermaid) work the same way: a `DiagramRenderer` protocol hook,
-because turning Mermaid syntax into an image inherently needs a small JS
-context (no native Swift port of Mermaid exists) — that's the one piece
-this package can't avoid delegating out, but it stays an injected,
-optional capability rather than a hard dependency.
+Diagrams (Mermaid) work the same way: a fenced ` ```mermaid ` block becomes
+a `.diagram` block, handed to a `DiagramRenderer` protocol hook the
+*consumer* implements (typically a hidden `WKWebView` running mermaid.js,
+screenshotted once layout settles) — turning Mermaid syntax into an image
+inherently needs a small JS context (no native Swift port of Mermaid
+exists), so that's the one piece this package can't avoid delegating out,
+but it stays an injected, optional capability rather than a hard
+dependency. No renderer supplied, or one that can't parse a given diagram,
+falls back to the raw Mermaid source shown as a code block — deliberately
+*not* an attempt at a hand-rolled ASCII approximation of the diagram, same
+"show the source, don't fake it" reasoning `FormulaRenderer`/`ImageRenderer`
+already use.
 
 ## Styling is injected too — bring your own brand
 
@@ -71,11 +78,12 @@ in practice, without opening that door.
 
 ## Status
 
-Phases 1 through 5, plus images and theme injection, done and in real
-production use by a consuming app's document-export feature (parse →
-render → paginate to PDF/DOCX; a `FormulaRenderer` and/or `ImageRenderer`
-implementation is the only glue code a consumer needs to add math/images
-on top, and a `DocumentTheme` is entirely optional on top of that).
+Phases 1 through 5, plus images, theme injection, and Mermaid diagrams,
+done and in real production use by a consuming app's document-export
+feature (parse → render → paginate to PDF/DOCX; a `FormulaRenderer`
+and/or `ImageRenderer`/`DiagramRenderer` implementation is the only glue
+code a consumer needs to add math/images/diagrams on top, and a
+`DocumentTheme` is entirely optional on top of that).
 
 - [x] Phase 1: block layout core — headings, paragraphs (justified,
       hyphenated), lists, fenced code blocks. `DocumentBlock`/`DocumentParser`
@@ -148,9 +156,8 @@ on top, and a `DocumentTheme` is entirely optional on top of that).
       around the formula ending up split across the new line break and no
       longer recognized as a pair). No renderer supplied, or one that can't
       parse a given LaTeX string, falls back to the raw source text, never
-      a blank gap. `DiagramRenderer` (Mermaid) is not started — no native
-      Swift port of Mermaid exists, so it would need to delegate to a small
-      JS context, unlike everything else here.
+      a blank gap. `DiagramRenderer` (Mermaid) followed later, once images
+      existed to model it on — see its own entry below.
 - [x] Phase 5: `PDFRenderer` — paginates a `DocumentRenderer`-produced
       `NSAttributedString` into a real multi-page PDF via raw CoreText
       (`CTFramesetter`/`CTFrameDraw`), no `NSPrintOperation` round trip, no
@@ -189,7 +196,19 @@ on top, and a `DocumentTheme` is entirely optional on top of that).
       `TableRenderer.swift`; `TableLayout` carries its own `theme` so
       `PDFRenderer` (which never sees a theme directly) still draws a
       table's borders/header shading in the right colors.
-- [ ] `DiagramRenderer` (Mermaid) — not started, see Phase 4's note above.
+- [x] `DiagramRenderer` (Mermaid) — a fenced ` ```mermaid ` block's language
+      tag is checked at parse time (case-insensitively) so it becomes a
+      `.diagram(source:)` block instead of a plain `.codeBlock`; every other
+      fenced language is untouched. Rendered exactly like `.image` once an
+      image exists — same content-width scaling, same "never scaled up"
+      rule, same shared `scaledImageAttachmentParagraph` helper — the only
+      difference is *getting* that image, via `DiagramRenderer.image(forMermaidSource:)`
+      instead of `ImageRenderer.image(forSource:altText:)`. No renderer, or
+      one that returns `nil` for a given diagram, falls back to the raw
+      Mermaid source rendered as a code block (reusing `codeParagraph`'s own
+      styling) — deliberately not a hand-rolled ASCII-art attempt at the
+      diagram, which would risk looking like a real (but wrong) rendering
+      rather than an honest "this needs a renderer" fallback.
 
 ## Requirements
 

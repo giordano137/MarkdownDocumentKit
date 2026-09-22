@@ -57,6 +57,11 @@ public enum DocumentBlock: Equatable {
     /// which need an injected `ImageRenderer`, since this package does no disk/network I/O of
     /// its own).
     case image(altText: String, source: String)
+    /// A fenced ` ```mermaid ` code block — recognized specifically (the parser checks the fence's
+    /// language tag) because it needs to become a rendered diagram image via an injected
+    /// `DiagramRenderer`, not a monospaced text dump the way every other fenced language stays a
+    /// plain `.codeBlock`. `source` is the fence's raw content, unmodified.
+    case diagram(source: String)
 }
 
 /// Turns Markdown source into `[DocumentBlock]`. Line-oriented, not a full CommonMark
@@ -69,11 +74,17 @@ public enum DocumentParser {
 
         var isCodeBlockOpen = false
         var codeLines: [String] = []
+        var codeBlockLanguage = ""
 
         func flushCodeBlock() {
             guard !codeLines.isEmpty else { return }
-            blocks.append(.codeBlock(lines: codeLines))
+            if codeBlockLanguage.lowercased() == "mermaid" {
+                blocks.append(.diagram(source: codeLines.joined(separator: "\n")))
+            } else {
+                blocks.append(.codeBlock(lines: codeLines))
+            }
             codeLines = []
+            codeBlockLanguage = ""
         }
 
         // Index-based rather than `for rawLine in lines` — a table block needs to look ahead
@@ -87,8 +98,11 @@ public enum DocumentParser {
             if trimmed.hasPrefix("```") {
                 if isCodeBlockOpen {
                     flushCodeBlock()
+                    isCodeBlockOpen = false
+                } else {
+                    codeBlockLanguage = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                    isCodeBlockOpen = true
                 }
-                isCodeBlockOpen.toggle()
                 index += 1
                 continue
             }
