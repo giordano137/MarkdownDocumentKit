@@ -1,5 +1,9 @@
 # MarkdownDocumentKit
 
+![Swift 5.10+](https://img.shields.io/badge/swift-5.10%2B-F05138?logo=swift&logoColor=white)
+![Platforms: macOS 14+ | iOS 17+](https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20iOS%2017%2B-lightgrey)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue)
+
 A native Swift package that lays out Markdown as an actual structured
 document — tables, callout boxes (`> [!NOTE]`-style), headings, lists, and
 embedded images — and renders the result to PDF, DOCX, or a plain
@@ -30,11 +34,18 @@ try pdfData.write(to: URL(fileURLWithPath: "report.pdf"))
 ```
 
 That's the whole PDF path — no setup, no injected renderers, nothing to
-configure. `attributed` also round-trips through AppKit's own OOXML writer
-(`NSAttributedString.data(from:documentAttributes:[.documentType: .officeOpenXML])`)
-if you want a `.docx` instead; this package doesn't write DOCX itself, it
+configure. Want a `.docx` instead? `attributed` round-trips through
+AppKit's own OOXML writer — this package doesn't write DOCX itself, it
 just produces an `NSAttributedString` that writer already knows how to
-serialize.
+serialize:
+
+```swift
+let docxData = try attributed.data(
+    from: NSRange(location: 0, length: attributed.length),
+    documentAttributes: [.documentType: NSAttributedString.DocumentType.officeOpenXML]
+)
+try docxData.write(to: URL(fileURLWithPath: "report.docx"))
+```
 
 Math, images from a path/URL, and Mermaid diagrams need one more step —
 see "Injecting math, images, and diagrams" below — but everything else
@@ -146,12 +157,8 @@ let attributed = DocumentRenderer.attributedString(from: blocks, title: title, t
 
 Overriding one field (or one callout kind) leaves everything else at its
 default — no need to restate the whole theme to change a single color.
-Deliberately *not* stretched to cover font *family*: every text run here is
-a system-font regular/bold/italic/monospaced variant, and letting a
-consumer swap in an arbitrary custom typeface would mean re-deriving
-bold/italic synthesis for that typeface too (a real, separate feature) —
-colors/sizes/spacing are what "our brand instead of yours" concretely means
-in practice, without opening that door.
+Deliberately *not* stretched to cover font *family* — see "Known
+limitations" below, and `DocumentTheme.swift`'s own doc comment for why.
 
 ## Known limitations
 
@@ -159,8 +166,10 @@ in practice, without opening that door.
   no Linux, Windows, or Android, and that's not on the roadmap; it's the
   whole point of not reaching for a browser engine.
 - **No font-family theming.** `DocumentTheme` covers color/size/spacing;
-  every glyph is a system-font regular/bold/italic/monospaced variant (see
-  "Styling is injected too" above for why).
+  every glyph is a system-font regular/bold/italic/monospaced variant —
+  see `DocumentTheme.swift`'s own doc comment for why (letting a consumer
+  swap in an arbitrary custom typeface would mean re-deriving bold/italic
+  synthesis for that typeface too, a real feature of its own).
 - **DOCX tables are images, not real Word tables.** The PDF path draws
   genuinely selectable/searchable table text; DOCX export currently gets a
   flattened picture of the same table instead (`NSTextTable`/
