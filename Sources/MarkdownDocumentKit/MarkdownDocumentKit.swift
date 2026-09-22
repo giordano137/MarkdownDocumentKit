@@ -5,12 +5,11 @@
 // — see README for why this exists instead of a full LaTeX engine or a
 // browser-based pipeline.
 //
-// Phase 1 (block layout core) is not implemented yet — this is scaffolding.
+// The real API lives in DocumentParser (parsing), DocumentRenderer/TableRenderer
+// (layout), and PDFRenderer (pagination) — see README for current status.
 
 import Foundation
 
-/// Placeholder entry point. Real API (block-model parser + CoreText/CoreGraphics
-/// layout + PDF/DOCX renderers) lands with Phase 1.
 public enum MarkdownDocumentKit {
-    public static let version = "0.0.1"
+    public static let version = "1.0.0"
 }
