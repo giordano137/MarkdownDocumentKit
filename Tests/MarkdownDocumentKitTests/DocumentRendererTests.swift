@@ -214,6 +214,37 @@ private struct MockDiagramRenderer: DiagramRenderer {
     #expect(background == DocumentTheme.default.codeBlockBackground)
 }
 
+@Test func codeBlockHasNoExtraParagraphSpacingBetweenInteriorLines() {
+    // Regression guard: codeParagraph used to build the whole multi-line block as one
+    // NSAttributedString with a single, uniformly-applied NSParagraphStyle carrying non-zero
+    // paragraphSpacingBefore/paragraphSpacing — but every "\n" still starts a new paragraph for
+    // layout purposes no matter how the attribute was applied, so that spacing landed between
+    // *every* pair of lines inside the block, not just before/after the block as a whole. Only
+    // visible by actually opening a generated PDF (a real multi-line code block showed a visible
+    // gap in its shaded background between every line) — attribute-presence tests like
+    // `codeBlockCarriesBackgroundColorForShading` above couldn't catch it, since the background
+    // color attribute itself was always correct; only the paragraph style's spacing values were
+    // wrong for interior lines.
+    let blocks: [DocumentBlock] = [.codeBlock(lines: ["line one", "line two", "line three"])]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+
+    func paragraphStyle(containing needle: String) -> NSParagraphStyle? {
+        let range = (attributed.string as NSString).range(of: needle)
+        return attributed.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle
+    }
+
+    let first = paragraphStyle(containing: "line one")
+    let middle = paragraphStyle(containing: "line two")
+    let last = paragraphStyle(containing: "line three")
+
+    #expect(first?.paragraphSpacingBefore == DocumentTheme.default.codeBlockSpacingBefore)
+    #expect(first?.paragraphSpacing == 0)
+    #expect(middle?.paragraphSpacingBefore == 0)
+    #expect(middle?.paragraphSpacing == 0)
+    #expect(last?.paragraphSpacingBefore == 0)
+    #expect(last?.paragraphSpacing == DocumentTheme.default.codeBlockSpacingAfter)
+}
+
 @Test func codeBlockTextColorIsFixedNotDynamic() {
     // Regression guard: this used to be the dynamic `PlatformColor.textColor`, which resolved to a
     // barely-visible near-white when `PDFRenderer` drew it into a raw CGContext with no live

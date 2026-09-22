@@ -234,23 +234,40 @@ public enum DocumentRenderer {
 
     // MARK: - Code blocks
 
+    /// Builds one `NSAttributedString` run *per line*, each with its own `NSParagraphStyle`,
+    /// rather than a single attributes dictionary applied uniformly across
+    /// `lines.joined(separator: "\n")` (this function's original version). That uniform version
+    /// looked identical in a debugger/`.string` inspection, but every `\n` still starts a new
+    /// "paragraph" for layout purposes regardless of how the attribute was applied — so a *shared*
+    /// `paragraphSpacingBefore`/`paragraphSpacing` landed between every pair of lines inside the
+    /// block, not just before/after the block as a whole, opening a visible gap in the shaded
+    /// background between every two lines of a multi-line code block. Caught only by opening an
+    /// actual generated PDF (no test asserted on inter-line spacing, only on text/attribute
+    /// presence) — putting the before-spacing on just the first line and the after-spacing on just
+    /// the last one closes those gaps while leaving the block's own outer spacing unchanged.
     private static func codeParagraph(_ lines: [String], theme: DocumentTheme) -> NSAttributedString {
-        let style = NSMutableParagraphStyle()
-        style.paragraphSpacingBefore = theme.codeBlockSpacingBefore
-        style.paragraphSpacing = theme.codeBlockSpacingAfter
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: PlatformFont.monospacedSystemFont(ofSize: theme.codeFontSize, weight: .regular),
-            // Fixed by default (`theme.codeText`), not a dynamic system color — a dynamic
-            // semantic color resolves to something barely visible when drawn into a raw
-            // `CGContext` outside any live window (`PDFRenderer`'s PDF page). Confirmed by
-            // opening an actual generated PDF with a code block — the text was there (present in
-            // the text layer) but rendered nearly invisible, not caught by any passing unit test
-            // since none of them assert on the *color*, only on the text's presence/attributes.
-            .foregroundColor: theme.codeText,
-            .backgroundColor: theme.codeBlockBackground,
-            .paragraphStyle: style,
-        ]
-        return NSAttributedString(string: lines.joined(separator: "\n") + "\n", attributes: attributes)
+        let font = PlatformFont.monospacedSystemFont(ofSize: theme.codeFontSize, weight: .regular)
+        let result = NSMutableAttributedString()
+        for (index, line) in lines.enumerated() {
+            let style = NSMutableParagraphStyle()
+            style.paragraphSpacingBefore = index == 0 ? theme.codeBlockSpacingBefore : 0
+            style.paragraphSpacing = index == lines.count - 1 ? theme.codeBlockSpacingAfter : 0
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                // Fixed by default (`theme.codeText`), not a dynamic system color — a dynamic
+                // semantic color resolves to something barely visible when drawn into a raw
+                // `CGContext` outside any live window (`PDFRenderer`'s PDF page). Confirmed by
+                // opening an actual generated PDF with a code block — the text was there (present
+                // in the text layer) but rendered nearly invisible, not caught by any passing unit
+                // test since none of them assert on the *color*, only on the text's
+                // presence/attributes.
+                .foregroundColor: theme.codeText,
+                .backgroundColor: theme.codeBlockBackground,
+                .paragraphStyle: style,
+            ]
+            result.append(NSAttributedString(string: line + "\n", attributes: attributes))
+        }
+        return result
     }
 
     // MARK: - Tables
