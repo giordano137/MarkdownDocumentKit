@@ -1,0 +1,29 @@
+name: Release
+
+# Turns a pushed vX.Y.Z tag into a real GitHub Release automatically — see
+# CONTRIBUTING.md's "Releasing" section for why bare tags aren't enough on
+# their own (invisible in the GitHub UI, no notes shown anywhere, not what
+# Swift Package Index displays). This closes the gap structurally instead
+# of relying on remembering a separate `gh release create` step by hand
+# every time.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Create GitHub Release from the tag's own annotation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" --notes-from-tag --verify-tag
