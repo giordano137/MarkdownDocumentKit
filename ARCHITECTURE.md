@@ -6,7 +6,7 @@ bugs that shaped it. For "what is this and how do I use it," see
 [README.md](README.md) instead; this file is the deep end, not the front
 door.
 
-Phases 1 through 5, plus images, theme injection, and Mermaid diagrams,
+Phases 1 through 6, plus images, theme injection, and Mermaid diagrams,
 done and in real production use by a consuming app's document-export
 feature (parse → render → paginate to PDF/DOCX; a `FormulaRenderer`
 and/or `ImageRenderer`/`DiagramRenderer` implementation is the only glue
@@ -106,8 +106,10 @@ code a consumer needs to add math/images/diagrams on top, and a
       picture, since DOCX has no equivalent of drawing text directly into
       arbitrary page coordinates the way a raw CoreText PDF page allows).
       Still shared: everything Phase 1 covers. Still open: rounded table
-      corners + centering, and giving DOCX a real (not image) table too via
-      `NSTextTable`/`NSTextTableBlock`.
+      corners + centering. Real (not image) DOCX tables — the obvious next
+      step from here — turned out not to be the `NSTextTable`/
+      `NSTextTableBlock` job this originally assumed; see Phase 6 below for
+      why, and what it took instead.
 - [x] Images: a whole-line `![alt](source)` becomes an `.image` block,
       scaled down to fit the page's content width (never scaled up) and
       never mistaken for an inline image mid-sentence — like `.formula`,
@@ -158,3 +160,146 @@ code a consumer needs to add math/images/diagrams on top, and a
       font-*size* field either: unlike `FormulaRenderer`'s `fontSize`, a
       diagram never has to sit on a shared baseline with surrounding text,
       so its internal sizing stays the diagramming library's own concern.
+- [x] Phase 6: real DOCX tables (`WordDocumentExporter`). The obvious
+      approach — build the table out of `NSTextTable`/`NSTextTableBlock`
+      instead of `TableAttachment`, since that's the API AppKit's text
+      system offers for exactly this — turned out not to work: verified
+      empirically (not assumed) by writing an `NSAttributedString`
+      containing a real `NSTextTable` structure through AppKit's own
+      `.officeOpenXML` writer and inspecting the resulting `document.xml`
+      directly. It came out as plain sequential `<w:p>` paragraphs with no
+      `<w:tbl>` anywhere — the writer silently drops `NSTextTableBlock`
+      structure. (The same source string written to `.rtf` instead *does*
+      come out as a real table, confirmed by the `\trowd`/`\cell`/`\row`
+      markup in the output — ruling out "wrong way to build the table" and
+      narrowing it to "this specific writer doesn't serialize it.")
+
+      So `WordDocumentExporter.export(...)` takes a different path: render
+      the document normally (`DocumentRenderer.blockParagraph`, shared with
+      `attributedString(from:...)`) except each `.table` block becomes a
+      short placeholder paragraph carrying a Private-Use-Area sentinel +
+      index (same non-collision trick `DocumentRenderer.extractInlineFormulas`
+      already relies on for math sentinels — distinct codepoints, so the two
+      never collide in one document). That string still goes through
+      AppKit's `.officeOpenXML` writer as normal, producing a `.docx` (a ZIP
+      container) with a correct placeholder paragraph sitting exactly where
+      each table belongs. Then: unzip it, find `word/document.xml`, replace
+      each placeholder paragraph with a hand-written `<w:tbl>` XML fragment
+      (`OOXMLTableWriter` — reuses `TableRenderer.computeLayout`'s column
+      widths, converted points→twips, and `TableRenderer.cellAttributedString`
+      for the same inline-Markdown-then-style pass the PDF/image paths
+      already use, so a **bold** cell renders bold here too), re-zip, done.
+      A paragraph's boundaries are found by searching for the *exact*
+      literal `<w:p>` (not just `<w:p`, which `<w:pPr>` — that same
+      paragraph's own properties element, sitting between the open tag and
+      the placeholder text — would also match) — paragraphs never nest in
+      OOXML, so the nearest `<w:p>`/`</w:p>` around the placeholder are
+      unambiguously its own.
+
+      Rewriting the ZIP needed a ZIP reader/writer in the first place —
+      `MinimalZipArchive`, deliberately scoped to exactly the shape AppKit's
+      writer actually produces (flat entries, plain Deflate or Stored, no
+      encryption/Zip64/data-descriptor trailers — confirmed against a real
+      generated `.docx` before writing the parser, not assumed) rather than
+      attempting a general-purpose ZIP library, which this package's own
+      "zero dependencies" stance (see `Package.swift`) would've made a much
+      larger ask for a format this package only ever produces itself, never
+      reads from a third party. Reading decompresses every entry via
+      `Compression`'s `COMPRESSION_ZLIB` decode — verified empirically that
+      this is, despite the name, raw deflate (no zlib wrapper), the exact
+      framing ZIP's method 8 uses, by decoding a real entry's compressed
+      bytes and diffing against `unzip -p`'s output byte-for-byte. Writing
+      always re-emits every entry **Stored** (uncompressed) rather than
+      re-deflating — this package only ever needs `compression_decode_buffer`
+      (decode), never the encode half, since only one small XML entry is
+      ever replaced; avoiding a hand-rolled raw-deflate *encoder* sidesteps
+      having to separately verify that encoder's framing is byte-correct
+      (encoding is materially easier to get subtly wrong than decoding — a
+      reader tolerates extra decode slack a writer's framing can't afford).
+      Mixing Stored and Deflated entries in one ZIP is completely ordinary
+      and every reader already handles it; the only cost is a few extra KB.
+
+      Validated three ways, deliberately not just "our own writer round-trips
+      through our own reader" (which would only prove internal consistency,
+      not spec-correctness): `unzip -l`/`unzip -q` (a completely independent
+      ZIP implementation) on the actual test output; `XMLDocument(data:...)`
+      confirming the spliced `document.xml` is well-formed XML, not just
+      text containing the right substrings; and `python-docx` (a fully
+      independent OOXML reader, unrelated to anything Apple ships) opening a
+      real generated `.docx` end-to-end and correctly reporting its table's
+      row/column count and per-cell bold runs.
+
+      Building this surfaced an unrelated, pre-existing bug in a much older
+      shared code path: `TableRenderer.cellAttributedString`'s and
+      `DocumentRenderer.inlineParagraph`'s own bold/italic detection
+      (`applyingPreservedBoldItalic`, now replaced) only ever read a run's
+      `.font` attribute — correct when `NSAttributedString(markdown:)` used
+      to bake **bold**/*italic* into an actual different font object, but
+      (confirmed empirically on the SDK this was developed against) current
+      `NSAttributedString(markdown:)` output no longer changes `.font` for
+      inline emphasis at all — it sets a font-less `.inlinePresentationIntent`
+      semantic attribute instead. That means **every** consumer of that
+      shared helper — not just this new DOCX-table code, but `PDFRenderer`'s
+      raw CoreText drawing and the existing DOCX image-table fallback too —
+      was silently rendering `**bold**`/`*italic*` as plain text on that SDK.
+      Fixed at the shared root (`emphasisTraits(in:)`/`applyingTraits(bold:
+      italic:to:)` in `PlatformTypes.swift`, checking both representations)
+      rather than only in the new OOXML-writing code, since the bug lived
+      upstream of every consumer, not inside any one of them.
+
+      A second bug only surfaced by actually opening a generated `.docx`
+      (Quick Look's own thumbnail renderer — a third independent OOXML
+      reader, separate from both `textutil` and `python-docx`) rather than
+      trusting green tests: table cells rendered in a serif fallback font
+      while the rest of the document showed the correct sans-serif one.
+      `OOXMLTableWriter` originally read `(runFont ?? font).familyName` for
+      `<w:rFonts>` — for the system font that resolves to
+      `.AppleSystemUIFont`, one of AppKit's private, dot-prefixed internal
+      names, unresolvable by any OOXML reader outside AppKit's own text
+      system. Fixed by hardcoding the real, resolved family
+      (`systemFontFamilyName = "Helvetica Neue"`) that AppKit's own writer
+      already stamps on every *non*-table paragraph in this exact same
+      document (confirmed by inspecting that writer's own XML) — not a
+      shortcut, since `DocumentTheme` deliberately never varies font family
+      (see its own doc comment), so this is the one family a table's text
+      can ever actually be in. Regression-covered by
+      `wordDocumentExporterTableCellsUseTheSameFontFamilyAsTheRestOfTheDocument`,
+      which compares the table's resolved family against the body
+      paragraph's own rather than asserting a literal string, so it stays
+      correct even if a future OS resolves the system font to a different
+      real name.
+
+      Editability, not just visual correctness, needs its own check:
+      whether the table can actually be *changed* afterward, not merely
+      displayed. `python-docx` (a spec-faithful third-party OOXML
+      implementation, unrelated to Apple's own toolchain) editing a
+      generated `.docx` — changing a cell, renaming the header, appending
+      a whole new row, saving, then reopening with a fresh instance —
+      confirms every edit persists and the file stays valid, direct
+      evidence this is a genuine editable table rather than a read-only
+      approximation of one.
+
+      TextEdit is not a usable stand-in for that same check. AppKit's own
+      `.officeOpenXML` *reader* (TextEdit's underlying text system, the
+      read-side counterpart of the writer this whole feature routes
+      around) drops `<w:tbl>` structure on an open-then-resave round trip
+      for any table, including a plain `python-docx`-generated reference
+      table with no relation to this package's own output — the reader has
+      no more real table support than the writer does, consistent with
+      this phase's opening finding rather than contradicting it. (A stray
+      leftover document from an earlier AppleScript check can make a
+      broken round trip look like a working one — `document 1` is
+      whichever window is frontmost, not necessarily the one just opened —
+      so a claim like this needs an explicit document-count/name check
+      before it's trusted.) This package has not been validated against an
+      actual copy of Microsoft Word or LibreOffice; `python-docx` is the
+      practical stand-in. The automatable substitute that *is* in the
+      suite for CI, where no editor is installed at all:
+      `wordDocumentExporterTableElementsFollowTheRequiredOOXMLSchemaOrder`
+      walks the parsed XML tree (`XMLDocument`, not string/regex order
+      checks) confirming `<w:tbl>`'s children appear in the exact sequence
+      the OOXML schema requires (`tblPr`, `tblGrid`, one-or-more `tr` each
+      holding one-or-more `tc`, each `tc`'s `tcPr` before its `p`) — the
+      structural precondition every real editor's schema validation
+      actually checks, verifiable without depending on one being installed
+      in CI.

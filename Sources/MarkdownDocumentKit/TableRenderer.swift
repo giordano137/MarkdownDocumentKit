@@ -258,8 +258,11 @@ public enum TableRenderer {
     }
 
     /// Same inline-Markdown-then-style approach as `DocumentRenderer`'s own paragraphs, so a
-    /// **bold** table cell renders bold instead of showing literal asterisks.
-    private static func cellAttributedString(
+    /// **bold** table cell renders bold instead of showing literal asterisks. Not `private`: also
+    /// reused by `DocumentRenderer.wordTableParagraph` (AppKit-only) to style the cells of a real
+    /// `NSTextTable`-backed Word table with the exact same markdown/font/color handling, rather
+    /// than duplicating this logic for that second table representation.
+    static func cellAttributedString(
         _ text: String,
         font: PlatformFont,
         alignment: TableAlignment,
@@ -287,8 +290,9 @@ public enum TableRenderer {
         // "exported file, no live theme to resolve against" reasoning.
         mutable.addAttribute(.foregroundColor, value: theme.tableText, range: fullRange)
 
-        mutable.enumerateAttribute(.font, in: fullRange, options: []) { value, range, _ in
-            let resolvedFont = applyingPreservedBoldItalic(from: value as? PlatformFont, to: font)
+        mutable.enumerateAttributes(in: fullRange, options: []) { attrs, range, _ in
+            let traits = emphasisTraits(in: attrs)
+            let resolvedFont = applyingTraits(bold: traits.bold, italic: traits.italic, to: font)
             mutable.addAttribute(.font, value: resolvedFont, range: range)
         }
         return mutable

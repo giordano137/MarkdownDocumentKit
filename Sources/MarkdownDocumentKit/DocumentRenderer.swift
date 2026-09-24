@@ -43,51 +43,71 @@ public enum DocumentRenderer {
         result.append(styledTitle(title, theme: theme))
 
         for block in blocks {
-            switch block {
-            case .heading(let level, let text):
-                result.append(headingParagraph(text, level: level, theme: theme, formulaRenderer: formulaRenderer))
-
-            case .paragraph(let text):
-                result.append(bodyParagraph(text, theme: theme, formulaRenderer: formulaRenderer))
-
-            case .blockquote(let text):
-                result.append(blockquoteParagraph(text, theme: theme, formulaRenderer: formulaRenderer))
-
-            case .callout(let kind, let text):
-                result.append(calloutParagraph(kind: kind, text: text, theme: theme, formulaRenderer: formulaRenderer))
-
-            case .listItem(let ordered, let number, let level, let text):
-                let bullet = ordered ? "\(number ?? 1).  " : "\(bulletCharacter(forLevel: level))  "
-                result.append(listParagraph(bullet + text, level: level, theme: theme, formulaRenderer: formulaRenderer))
-
-            case .codeBlock(let lines):
-                result.append(codeParagraph(lines, theme: theme))
-
-            case .table(let header, let alignments, let rows):
-                result.append(
-                    tableParagraph(header: header, alignments: alignments, rows: rows, contentWidth: contentWidth, theme: theme)
+            result.append(
+                blockParagraph(
+                    block,
+                    contentWidth: contentWidth,
+                    theme: theme,
+                    formulaRenderer: formulaRenderer,
+                    imageRenderer: imageRenderer,
+                    diagramRenderer: diagramRenderer
                 )
-
-            case .formula(let latex):
-                result.append(formulaParagraph(latex: latex, theme: theme, formulaRenderer: formulaRenderer))
-
-            case .image(let altText, let source):
-                result.append(
-                    imageParagraph(altText: altText, source: source, contentWidth: contentWidth, theme: theme, imageRenderer: imageRenderer)
-                )
-
-            case .diagram(let source):
-                result.append(
-                    diagramParagraph(source: source, contentWidth: contentWidth, theme: theme, diagramRenderer: diagramRenderer)
-                )
-            }
+            )
         }
         return result
     }
 
+    /// One block's styled paragraph(s) — pulled out of `attributedString(from:...)` so
+    /// `wordAttributedString(from:...)` (AppKit-only, see that file's extension) can reuse the
+    /// exact same rendering for every block *except* `.table`, where it substitutes a real
+    /// `NSTextTable`-backed paragraph instead of this function's `TableAttachment` image.
+    static func blockParagraph(
+        _ block: DocumentBlock,
+        contentWidth: CGFloat,
+        theme: DocumentTheme,
+        formulaRenderer: FormulaRenderer?,
+        imageRenderer: ImageRenderer?,
+        diagramRenderer: DiagramRenderer?
+    ) -> NSAttributedString {
+        switch block {
+        case .heading(let level, let text):
+            return headingParagraph(text, level: level, theme: theme, formulaRenderer: formulaRenderer)
+
+        case .paragraph(let text):
+            return bodyParagraph(text, theme: theme, formulaRenderer: formulaRenderer)
+
+        case .blockquote(let text):
+            return blockquoteParagraph(text, theme: theme, formulaRenderer: formulaRenderer)
+
+        case .callout(let kind, let text):
+            return calloutParagraph(kind: kind, text: text, theme: theme, formulaRenderer: formulaRenderer)
+
+        case .listItem(let ordered, let number, let level, let text):
+            let bullet = ordered ? "\(number ?? 1).  " : "\(bulletCharacter(forLevel: level))  "
+            return listParagraph(bullet + text, level: level, theme: theme, formulaRenderer: formulaRenderer)
+
+        case .codeBlock(let lines):
+            return codeParagraph(lines, theme: theme)
+
+        case .table(let header, let alignments, let rows):
+            return tableParagraph(header: header, alignments: alignments, rows: rows, contentWidth: contentWidth, theme: theme)
+
+        case .formula(let latex):
+            return formulaParagraph(latex: latex, theme: theme, formulaRenderer: formulaRenderer)
+
+        case .image(let altText, let source):
+            return imageParagraph(altText: altText, source: source, contentWidth: contentWidth, theme: theme, imageRenderer: imageRenderer)
+
+        case .diagram(let source):
+            return diagramParagraph(source: source, contentWidth: contentWidth, theme: theme, diagramRenderer: diagramRenderer)
+        }
+    }
+
     // MARK: - Title
 
-    private static func styledTitle(_ text: String, theme: DocumentTheme) -> NSAttributedString {
+    /// Not `private`: also used by `wordAttributedString(from:...)` (AppKit-only, see
+    /// `DocumentRenderer+Word.swift`) to give the Word export the exact same title styling.
+    static func styledTitle(_ text: String, theme: DocumentTheme) -> NSAttributedString {
         let style = NSMutableParagraphStyle()
         style.paragraphSpacing = theme.titleSpacing
         return NSAttributedString(
@@ -362,8 +382,9 @@ public enum DocumentRenderer {
         // Base font applied first, then re-applied preserving bold/italic traits already set by
         // the inline Markdown parse above — a **bold** run's font would otherwise get clobbered
         // back down to the plain base font.
-        mutable.enumerateAttribute(.font, in: fullRange, options: []) { value, range, _ in
-            let font = applyingPreservedBoldItalic(from: value as? PlatformFont, to: baseFont)
+        mutable.enumerateAttributes(in: fullRange, options: []) { attrs, range, _ in
+            let traits = emphasisTraits(in: attrs)
+            let font = applyingTraits(bold: traits.bold, italic: traits.italic, to: baseFont)
             mutable.addAttribute(.font, value: font, range: range)
         }
         mutable.append(NSAttributedString(string: "\n"))

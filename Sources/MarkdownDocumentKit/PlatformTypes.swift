@@ -50,30 +50,59 @@ extension PlatformColor {
     }
 }
 
-/// Re-applies whichever of bold/italic `sourceFont` carries onto `baseFont`, preserving
-/// `baseFont`'s family/size — used after `NSAttributedString(markdown:)` parses `**bold**`/
-/// `*italic*` into *some* system font, so the result renders in the same family/size as the rest
-/// of the paragraph instead of whatever font Markdown parsing happened to pick. Two real
+/// Bold/italic emphasis from `NSAttributedString(markdown:)`'s output can arrive two different
+/// ways depending on OS version: as an actual bold/italic `.font` (older behavior — a genuinely
+/// different font object already carrying the trait) or as a font-less `.inlinePresentationIntent`
+/// semantic attribute (current behavior — verified empirically against this SDK: **bold**/*italic*
+/// no longer changes `.font` at all, only sets this attribute instead). Neither raw CoreText
+/// drawing (`PDFRenderer`/`TableRenderer.drawTable`) nor `OOXMLTableWriter`'s `<w:b/>`/`<w:i/>`
+/// detection understands `.inlinePresentationIntent` on its own — only a real font trait — so
+/// checking just one of these two silently drops emphasis on whichever OS version uses the other.
+/// `InlinePresentationIntent`'s raw bridged value at the `NSAttributedString` layer comes back as
+/// an `Int` (`Foundation.InlinePresentationIntent(rawValue:)` decodes it back into the typed
+/// option set — its own `rawValue` is `UInt`, hence the conversion below), not the typed value
+/// `AttributedString` itself would hand back — this operates on
+/// `NSAttributedString` throughout (`DocumentRenderer`/`TableRenderer` both do, for the CoreText/
+/// AppKit APIs the rest of this package needs), so it has to read that raw form.
+func emphasisTraits(in attributes: [NSAttributedString.Key: Any]) -> (bold: Bool, italic: Bool) {
+    #if canImport(AppKit)
+    let fontTraits = (attributes[.font] as? PlatformFont)?.fontDescriptor.symbolicTraits ?? []
+    var bold = fontTraits.contains(.bold)
+    var italic = fontTraits.contains(.italic)
+    #elseif canImport(UIKit)
+    let fontTraits = (attributes[.font] as? PlatformFont)?.fontDescriptor.symbolicTraits ?? []
+    var bold = fontTraits.contains(.traitBold)
+    var italic = fontTraits.contains(.traitItalic)
+    #endif
+    if let rawIntent = attributes[.inlinePresentationIntent] as? Int {
+        let intent = InlinePresentationIntent(rawValue: UInt(rawIntent))
+        bold = bold || intent.contains(.stronglyEmphasized)
+        italic = italic || intent.contains(.emphasized)
+    }
+    return (bold, italic)
+}
+
+/// Applies `bold`/`italic` onto `baseFont`, preserving its family/size — the trait-synthesis half
+/// of what `applyingPreservedBoldItalic` used to do in one step, now split from detection
+/// (`emphasisTraits(in:)`) since detection needs a whole attributes dictionary (to see
+/// `.inlinePresentationIntent` alongside `.font`), not just a single candidate font. Two real
 /// implementations, not a renamed method: `NSFontDescriptor.SymbolicTraits` and
 /// `UIFontDescriptor.SymbolicTraits` are different types with different case names (`.bold`/
 /// `.italic` vs `.traitBold`/`.traitItalic`), and `withSymbolicTraits(_:)` returns non-optional on
 /// one platform, optional on the other.
-func applyingPreservedBoldItalic(from sourceFont: PlatformFont?, to baseFont: PlatformFont) -> PlatformFont {
+func applyingTraits(bold: Bool, italic: Bool, to baseFont: PlatformFont) -> PlatformFont {
+    guard bold || italic else { return baseFont }
     #if canImport(AppKit)
-    let traits = sourceFont?.fontDescriptor.symbolicTraits ?? []
-    var descriptor = baseFont.fontDescriptor
-    if !traits.isDisjoint(with: [.bold, .italic]) {
-        descriptor = descriptor.withSymbolicTraits(traits.intersection([.bold, .italic]))
-    }
+    var symbolic: NSFontDescriptor.SymbolicTraits = []
+    if bold { symbolic.insert(.bold) }
+    if italic { symbolic.insert(.italic) }
+    let descriptor = baseFont.fontDescriptor.withSymbolicTraits(symbolic)
     return NSFont(descriptor: descriptor, size: baseFont.pointSize) ?? baseFont
     #elseif canImport(UIKit)
-    let traits = sourceFont?.fontDescriptor.symbolicTraits ?? []
-    var descriptor = baseFont.fontDescriptor
-    if !traits.isDisjoint(with: [.traitBold, .traitItalic]) {
-        if let withTraits = descriptor.withSymbolicTraits(traits.intersection([.traitBold, .traitItalic])) {
-            descriptor = withTraits
-        }
-    }
+    var symbolic: UIFontDescriptor.SymbolicTraits = []
+    if bold { symbolic.insert(.traitBold) }
+    if italic { symbolic.insert(.traitItalic) }
+    guard let descriptor = baseFont.fontDescriptor.withSymbolicTraits(symbolic) else { return baseFont }
     return UIFont(descriptor: descriptor, size: baseFont.pointSize)
     #endif
 }

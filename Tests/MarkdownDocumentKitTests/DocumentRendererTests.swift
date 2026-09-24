@@ -401,4 +401,206 @@ private struct MockDiagramRenderer: DiagramRenderer {
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
     #expect(attributed.length >= 0)
 }
+
+// MARK: - WordDocumentExporter (AppKit-only: DOCX writing isn't available on UIKit at all)
+
+#if canImport(AppKit)
+/// Extracts `word/document.xml` from `data` via `/usr/bin/unzip` — deliberately *not*
+/// `MinimalZipArchive.read` (which these tests are partly trying to validate) — so a bug in our
+/// own ZIP writer shows up as a failure here instead of being invisible to a self-checking round
+/// trip through our own reader.
+private func documentXML(fromDocxData data: Data) throws -> String {
+    let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+    let docxURL = tempDir.appendingPathComponent("out.docx")
+    try data.write(to: docxURL)
+
+    let unzipDir = tempDir.appendingPathComponent("unzipped")
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+    process.arguments = ["-q", docxURL.path, "-d", unzipDir.path]
+    try process.run()
+    process.waitUntilExit()
+
+    return try String(contentsOf: unzipDir.appendingPathComponent("word/document.xml"), encoding: .utf8)
+}
+
+@Test func wordDocumentExporterProducesARealTableElementWithCellText() throws {
+    let blocks: [DocumentBlock] = [
+        .table(header: ["Metric", "Q1"], alignments: [.none, .none], rows: [["Revenue", "12k"]])
+    ]
+    let data = try WordDocumentExporter.export(blocks, title: "Report")
+    let xml = try documentXML(fromDocxData: data)
+
+    #expect(xml.contains("<w:tbl>"))
+    #expect(xml.contains("Metric"))
+    #expect(xml.contains("Revenue"))
+    #expect(xml.contains("12k"))
+    // No leftover placeholder sentinel — it must have been fully replaced, not left alongside the
+    // real table.
+    #expect(!xml.contains("TABLE0"))
+}
+
+@Test func wordDocumentExporterOutputIsWellFormedXML() throws {
+    let blocks: [DocumentBlock] = [
+        .heading(level: 1, text: "Report"),
+        .paragraph(text: "Some **bold** prose."),
+        .table(header: ["A", "B"], alignments: [.left, .right], rows: [["1", "2"], ["3", "4"]]),
+        .paragraph(text: "After the table."),
+    ]
+    let data = try WordDocumentExporter.export(blocks, title: "Doc")
+    let xml = try documentXML(fromDocxData: data)
+
+    // Parsing as XML independently confirms our string-splice (paragraph-boundary search +
+    // `<w:tbl>` insertion) produced structurally valid markup, not just text that happens to
+    // contain the right substrings.
+    #expect(throws: Never.self) {
+        _ = try XMLDocument(data: Data(xml.utf8), options: [])
+    }
+}
+
+@Test func wordDocumentExporterTableElementsFollowTheRequiredOOXMLSchemaOrder() throws {
+    // Word (and any spec-compliant OOXML reader) requires a `<w:tbl>`'s children in exactly this
+    // sequence — `tblPr`, then `tblGrid`, then one-or-more `tr`, each holding one-or-more `tc`,
+    // each `tc` holding its `tcPr` before any `p` — not just "the right elements present
+    // somewhere". Getting this wrong would still pass `wordDocumentExporterOutputIsWellFormedXML`
+    // (still well-formed XML) and the other structural tests above (still contains the right
+    // text) while still being rejected or silently reinterpreted by a real editor — exactly the
+    // class of bug neither of those catches. This is the automatable half of "is this really
+    // editable": confirming an editor's schema *would* accept the shape, without depending on an
+    // actual editor (python-docx/Word/LibreOffice) being installed in CI.
+    let blocks: [DocumentBlock] = [
+        .table(header: ["A", "B"], alignments: [.left, .right], rows: [["1", "2"], ["3", "4"]])
+    ]
+    let data = try WordDocumentExporter.export(blocks, title: "")
+    let xml = try documentXML(fromDocxData: data)
+
+    let document = try XMLDocument(data: Data(xml.utf8), options: [])
+    let tables = try document.nodes(forXPath: "//*[local-name()='tbl']")
+    let table = try #require(tables.first as? XMLElement)
+    #expect(tables.count == 1)
+
+    let tableChildren = (table.children ?? []).compactMap { $0 as? XMLElement }
+    #expect(tableChildren.first?.localName == "tblPr")
+    #expect(tableChildren.dropFirst().first?.localName == "tblGrid")
+
+    let rows = Array(tableChildren.dropFirst(2))
+    #expect(!rows.isEmpty)
+    #expect(rows.allSatisfy { $0.localName == "tr" })
+
+    for row in rows {
+        let cells = (row.children ?? []).compactMap { $0 as? XMLElement }
+        #expect(!cells.isEmpty)
+        #expect(cells.allSatisfy { $0.localName == "tc" })
+        for cell in cells {
+            let cellChildren = (cell.children ?? []).compactMap { $0 as? XMLElement }
+            #expect(cellChildren.first?.localName == "tcPr")
+            #expect(cellChildren.dropFirst().allSatisfy { $0.localName == "p" })
+        }
+    }
+}
+
+@Test func wordDocumentExporterHandlesMultipleTablesAtTheirOwnPlaceholders() throws {
+    let blocks: [DocumentBlock] = [
+        .table(header: ["A"], alignments: [.none], rows: [["first"]]),
+        .paragraph(text: "Between the two tables."),
+        .table(header: ["B"], alignments: [.none], rows: [["second"]]),
+    ]
+    let data = try WordDocumentExporter.export(blocks, title: "")
+    let xml = try documentXML(fromDocxData: data)
+
+    #expect(xml.components(separatedBy: "<w:tbl>").count - 1 == 2)
+    #expect(xml.contains("first"))
+    #expect(xml.contains("second"))
+    #expect(xml.range(of: "first")!.lowerBound < xml.range(of: "Between the two tables")!.lowerBound)
+    #expect(xml.range(of: "Between the two tables")!.lowerBound < xml.range(of: "second")!.lowerBound)
+}
+
+@Test func wordDocumentExporterBoldTableCellProducesABoldRun() throws {
+    let blocks: [DocumentBlock] = [
+        .table(header: ["A"], alignments: [.none], rows: [["**bold cell**"]])
+    ]
+    let data = try WordDocumentExporter.export(blocks, title: "")
+    let xml = try documentXML(fromDocxData: data)
+
+    let cellRange = xml.range(of: "bold cell")
+    #expect(cellRange != nil)
+    if let cellRange {
+        let precedingContext = xml[xml.startIndex..<cellRange.lowerBound].suffix(200)
+        #expect(precedingContext.contains("<w:b/>"))
+    }
+}
+
+@Test func wordDocumentExporterNonTableContentMatchesAttributedStringText() throws {
+    // Only `.table` should diverge from `attributedString(from:...)` — everything else routes
+    // through the exact same `DocumentRenderer.blockParagraph`.
+    let blocks: [DocumentBlock] = [
+        .heading(level: 1, text: "Report"),
+        .paragraph(text: "Some prose."),
+    ]
+    let data = try WordDocumentExporter.export(blocks, title: "Doc")
+    let xml = try documentXML(fromDocxData: data)
+    #expect(xml.contains("Doc"))
+    #expect(xml.contains("Report"))
+    #expect(xml.contains("Some prose."))
+}
+
+@Test func wordDocumentExporterFallsBackToPlainTextForAZeroColumnTable() throws {
+    // OOXMLTableWriter.tableXML returns nil for a zero-column table, same as
+    // TableRenderer.computeLayout — must not throw or silently drop the block.
+    let blocks: [DocumentBlock] = [.table(header: [], alignments: [], rows: [])]
+    let data = try WordDocumentExporter.export(blocks, title: "")
+    #expect(!data.isEmpty)
+}
+
+@Test func wordDocumentExporterTableCellsUseTheSameFontFamilyAsTheRestOfTheDocument() throws {
+    // Regression coverage for a real, only-visually-obvious bug (caught by actually opening a
+    // generated .docx, not by any earlier string-contains test): table cells used to carry no
+    // `<w:rFonts>` at all, or one built from `NSFont.familyName`, which for the system font
+    // resolves to `.AppleSystemUIFont` — one of AppKit's private, dot-prefixed internal names, not
+    // a real typeface any OOXML reader outside AppKit's own text system can resolve. That rendered
+    // table text in Word's default serif fallback while the rest of the document (written by
+    // AppKit's own writer, which *does* resolve the system font to a real family) showed the
+    // correct sans-serif family. Deliberately not asserting a literal "Helvetica Neue" — comparing
+    // the table's family against the body paragraph's own `<w:rFonts>` keeps this correct even if
+    // a future OS resolves the system font to a different real name. Deliberately comparing the
+    // family on the *specific runs carrying our own visible text*, not "every `<w:rFonts>` in the
+    // document is identical": AppKit's writer itself emits a second, closely related family
+    // ("Helvetica" vs "Helvetica Neue") on its own unrelated empty trailing runs — a pre-existing
+    // writer quirk this test has no reason to assert away.
+    let blocks: [DocumentBlock] = [
+        .paragraph(text: "Distinctive body prose."),
+        .table(header: ["A"], alignments: [.none], rows: [["Distinctive cell text"]]),
+    ]
+    let data = try WordDocumentExporter.export(blocks, title: "")
+    let xml = try documentXML(fromDocxData: data)
+
+    #expect(!xml.contains(".AppleSystemUIFont"))
+
+    func fontFamily(precedingFirstOccurrenceOf marker: String) throws -> String {
+        let markerRange = try #require(xml.range(of: marker))
+        let precedingXML = String(xml[xml.startIndex..<markerRange.lowerBound])
+        let regex = try NSRegularExpression(pattern: #"<w:rFonts w:ascii="([^"]+)""#)
+        let nsPrecedingXML = precedingXML as NSString
+        let lastMatch = try #require(
+            regex.matches(in: precedingXML, range: NSRange(location: 0, length: nsPrecedingXML.length)).last
+        )
+        return nsPrecedingXML.substring(with: lastMatch.range(at: 1))
+    }
+
+    let bodyFamily = try fontFamily(precedingFirstOccurrenceOf: "Distinctive body prose.")
+    let cellFamily = try fontFamily(precedingFirstOccurrenceOf: "Distinctive cell text")
+    #expect(bodyFamily == cellFamily)
+}
+
+@Test func wordDocumentExporterWithNoTablesSkipsZipRewritingEntirely() throws {
+    // No placeholders to find means no zip round trip needed — this exercises that early-return
+    // path (`guard !tables.isEmpty else { return officeOpenXMLData }`) explicitly.
+    let blocks: [DocumentBlock] = [.paragraph(text: "No tables here.")]
+    let data = try WordDocumentExporter.export(blocks, title: "")
+    let xml = try documentXML(fromDocxData: data)
+    #expect(xml.contains("No tables here."))
+}
+#endif
 #endif

@@ -46,17 +46,33 @@ try pdfData.write(to: URL(fileURLWithPath: "report.pdf"))
 ```
 
 That's the whole PDF path — no setup, no injected renderers, nothing to
-configure. Want a `.docx` instead? `attributed` round-trips through
-AppKit's own OOXML writer — this package doesn't write DOCX itself, it
-just produces an `NSAttributedString` that writer already knows how to
-serialize:
+configure. Want a `.docx` instead, with a real, editable Word table (not
+a picture of one)?
 
 ```swift
+let docxData = try WordDocumentExporter.export(blocks, title: "Quarterly Report")
+try docxData.write(to: URL(fileURLWithPath: "report.docx"))
+```
+
+`WordDocumentExporter` (AppKit-only — see "Known limitations") still goes
+through AppKit's own `.officeOpenXML` writer for everything else in the
+document, but hand-writes the `<w:tbl>` XML for each table itself and
+splices it in afterward. That's not a stylistic choice: a real
+`NSTextTable`/`NSTextTableBlock` structure — the "correct", built-in way
+to ask AppKit's text system for a table — turns out to get silently
+dropped by that specific writer (confirmed by writing the same source to
+`.rtf` instead, where it *does* come out as a real table — this is an
+`.officeOpenXML`-writer gap specifically, not the wrong way to ask). If
+you don't have any tables, or don't care whether they end up as an image,
+plain `attributedString(from:...)` still round-trips through that same
+writer directly:
+
+```swift
+let attributed = DocumentRenderer.attributedString(from: blocks, title: "Quarterly Report")
 let docxData = try attributed.data(
     from: NSRange(location: 0, length: attributed.length),
     documentAttributes: [.documentType: NSAttributedString.DocumentType.officeOpenXML]
 )
-try docxData.write(to: URL(fileURLWithPath: "report.docx"))
 ```
 
 Math, images from a path/URL, and Mermaid diagrams need one more step —
@@ -182,11 +198,11 @@ limitations" below, and `DocumentTheme.swift`'s own doc comment for why.
   see `DocumentTheme.swift`'s own doc comment for why (letting a consumer
   swap in an arbitrary custom typeface would mean re-deriving bold/italic
   synthesis for that typeface too, a real feature of its own).
-- **DOCX tables are images, not real Word tables.** The PDF path draws
-  genuinely selectable/searchable table text; DOCX export currently gets a
-  flattened picture of the same table instead (`NSTextTable`/
-  `NSTextTableBlock` support is on the list — see
-  [ARCHITECTURE.md](ARCHITECTURE.md)).
+- **`WordDocumentExporter` is AppKit-only.** Like the rest of DOCX support
+  in this package — `.data(from:documentAttributes:)` for `.officeOpenXML`
+  isn't available on UIKit at all, so there was never a cross-platform
+  DOCX path to begin with. `attributedString(from:...)`/`PDFRenderer`
+  stay fully cross-platform.
 - **Math and diagrams need your own renderer.** Without a `FormulaRenderer`/
   `DiagramRenderer`, a formula or Mermaid diagram falls back to its raw
   source text, not a rendered result — this package has zero dependencies
