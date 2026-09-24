@@ -6,7 +6,7 @@ bugs that shaped it. For "what is this and how do I use it," see
 [README.md](README.md) instead; this file is the deep end, not the front
 door.
 
-Phases 1 through 7, plus images, theme injection, and Mermaid diagrams,
+Phases 1 through 8, plus images, theme injection, and Mermaid diagrams,
 done and in real production use by a consuming app's document-export
 feature (parse → render → paginate to PDF/DOCX; a `FormulaRenderer`
 and/or `ImageRenderer`/`DiagramRenderer` implementation is the only glue
@@ -369,6 +369,45 @@ code a consumer needs to add math/images/diagrams on top, and a
       set anywhere else, never negative), so every `<w:position>` a
       generated `document.xml` could contain came from exactly this and
       always means "superscript."
+- [x] Phase 8: lowered the platform floor from iOS 17+/macOS 14+ to iOS
+      16+/macOS 13+. Not a code change — verified empirically (not
+      assumed) that nothing in this codebase actually needed iOS 17/macOS
+      14: lowering `Package.swift`'s `platforms:` and rebuilding/retesting
+      on both platforms (`swift test`, and `xcodebuild test` on an iOS
+      simulator) passed clean with zero availability errors, meaning
+      `.iOS(.v17)`/`.macOS(.v14)` had been a conservative default, not
+      something any API in use actually required.
+
+      Confirmed the enforcement mechanism itself, not just its absence of
+      complaints: temporarily added a function gated
+      `@available(iOS 99, macOS 99, *)` and called it unconditionally —
+      `swift build` correctly failed with an availability error even
+      though the actual host SDK (far newer than either 99 or 17) could
+      easily have satisfied it, and even printed `-target
+      arm64-apple-macos13.0` in its own invocation despite building on a
+      much newer real OS. This confirms `swift build`/`xcodebuild build`/
+      `test` always check availability against `Package.swift`'s declared
+      platform minimum specifically, regardless of which SDK or simulator
+      is actually present — which in turn means neither existing CI job
+      (`macos`, `ios-simulator` in `.github/workflows/swift.yml`) needed
+      any changes to start enforcing the new, lower floor: both already
+      build via `swift build`/`xcodebuild`, so both already inherited this
+      check the moment `Package.swift` changed. No new CI job added.
+
+      What this does *not* cover, and initially was assumed to be gettable
+      for free and turned out not to be: an actual iOS 16 simulator run.
+      Checked GitHub's own `actions/runner-images` repository directly
+      (not assumed from memory) — `macos-13` (whose bundled Xcode 14.x
+      would have shipped iOS 16 simulators) has been removed from the
+      available runner images entirely; `macos-14`, the oldest one left,
+      bundles Xcode 15.0.1 through 16.2, and the *oldest* iOS simulator any
+      of those ships is iOS 17.0. A genuine iOS 16 simulator is no longer
+      obtainable on GitHub-hosted infrastructure at all, only via a
+      self-hosted runner running an old Xcode — disproportionate
+      infrastructure for a package this size. The compile-time
+      availability check above is therefore the real, current
+      verification story for the lowered floor, not a stand-in for a
+      simulator run that was simply skipped.
 - [ ] Not currently planned: an automatically generated table of contents.
       Deliberately left out of Phase 7 rather than folded in — it's a
       different scale of work from task lists/footnotes, not just another

@@ -2,7 +2,7 @@
 
 ![Build Status](https://github.com/giordano137/MarkdownDocumentKit/actions/workflows/swift.yml/badge.svg)
 ![Swift 5.10+](https://img.shields.io/badge/swift-5.10%2B-F05138?logo=swift&logoColor=white)
-![Platforms: macOS 14+ | iOS 17+](https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20iOS%2017%2B-lightgrey)
+![Platforms: macOS 13+ | iOS 16+](https://img.shields.io/badge/platform-macOS%2013%2B%20%7C%20iOS%2016%2B-lightgrey)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
 A native Swift package that lays out Markdown as an actual structured
@@ -190,7 +190,7 @@ limitations" below, and `DocumentTheme.swift`'s own doc comment for why.
 
 ## Known limitations
 
-- **Apple-only.** AppKit/CoreText/CoreGraphics on macOS 14+ and iOS 17+ —
+- **Apple-only.** AppKit/CoreText/CoreGraphics on macOS 13+ and iOS 16+ —
   no Linux, Windows, or Android, and that's not on the roadmap; it's the
   whole point of not reaching for a browser engine.
 - **No font-family theming.** `DocumentTheme` covers color/size/spacing;
@@ -238,7 +238,11 @@ breaking change becomes a major bump.
 ## Requirements
 
 - Swift 5.10+
-- iOS 17+ / macOS 14+
+- iOS 16+ / macOS 13+ — enforced by `Package.swift`'s `platforms:` declaration,
+  which every CI job already builds and tests against (see
+  [ARCHITECTURE.md](ARCHITECTURE.md) for what that guarantees and what it
+  doesn't — no iOS 16 simulator is actually runnable in CI anymore, only
+  the deployment-target availability check itself).
 
 ## License
 
