@@ -5,11 +5,18 @@
 [![Platform Compatibility for MarkdownDocumentKit](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fgiordano137%2FMarkdownDocumentKit%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/giordano137/MarkdownDocumentKit)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
-A native Swift package that lays out Markdown as an actual structured
-document — tables, callout boxes (`> [!NOTE]`-style), headings, lists, and
-embedded images — and renders the result to PDF, DOCX, or a plain
-`NSAttributedString`, without a browser engine or an external typesetting
-binary.
+Turn Markdown into a finished document — **PDF, DOCX, or a plain
+`NSAttributedString`** — with real tables, callout boxes (`> [!NOTE]`-style),
+headings, lists, images, math, and Mermaid diagrams. Native Swift on iOS and
+macOS: no browser engine, no LaTeX install, no external typesetting binary,
+zero dependencies.
+
+The DOCX tables are **real Word tables** — selectable, editable, resizable in
+Word itself — not a picture of a table dropped into the file. That distinction
+isn't free: AppKit's own `.officeOpenXML` writer silently discards
+`NSTextTable` structure, so this package hand-writes the `<w:tbl>` OOXML
+itself. I'm not aware of another Apple-native way to get an editable table
+into a `.docx`.
 
 ![A generated PDF page with a heading, a blue Note callout, a table, a Mermaid diagram themed to match, and an orange Warning callout](docs/screenshot.png)
 
