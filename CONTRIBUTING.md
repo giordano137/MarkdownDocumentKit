@@ -61,8 +61,8 @@ review, written down so you know it before you spend the effort.
   and lookup-able — it has a correct answer, and you don't need to be able
   to produce it from memory to contribute here. Architecture has no
   lookup-able answer: it's a decision, and decisions need someone who
-  wants something. Concretely, know what *capability* changed rather than
-  what line 40 says: does a new field source-break existing exhaustive
+  wants something. Concretely, know what *capability* changed — not the
+  diff line by line: does a new field source-break existing exhaustive
   switches where a new case wouldn't have, does a new capability belong
   behind an injection point (`FormulaRenderer`-style) instead of baked in,
   does it touch `DocumentBlock`/`DocumentTheme`'s public shape at all. If
