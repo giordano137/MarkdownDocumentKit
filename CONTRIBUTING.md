@@ -18,14 +18,23 @@ half-solved elsewhere in the package.
 
   ```
   swift test
+  xcrun simctl list devices available     # pick any installed iPhone
   xcodebuild test -scheme MarkdownDocumentKit \
-    -destination "platform=iOS Simulator,name=iPhone 16"
+    -destination "platform=iOS Simulator,name=iPhone 17"
   ```
 
-  This package runs on both from one shared implementation, and a
-  coordinate-space or font-availability bug can pass on one platform and
-  silently break the other (see [ARCHITECTURE.md](ARCHITECTURE.md) for
-  real examples of exactly that). CI runs both jobs too, but catching it
+  Substitute whatever `simctl` lists — the device names Xcode ships with
+  change every year, so a pinned one rots. Two things worth knowing:
+  `xcodebuild` reacts to an unknown destination by printing its list of
+  known ones and carrying on, which reads like output rather than like a
+  failure, so confirm you actually got `** TEST SUCCEEDED **`. And the
+  Simulator run has fewer tests than `swift test` — the DOCX ones are
+  `canImport(AppKit)`-gated and don't exist there.
+
+  This package runs on both platforms from one shared implementation, and
+  a coordinate-space or font-availability bug can pass on one and silently
+  break the other (see [ARCHITECTURE.md](ARCHITECTURE.md) for real
+  examples of exactly that). CI runs both jobs too, but catching it
   locally is faster than catching it in review.
 - **Visual changes want a real look.** For spacing, colors or pagination,
   open the generated PDF rather than only asserting on attributes — see
