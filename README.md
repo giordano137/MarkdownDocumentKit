@@ -1,8 +1,8 @@
 # MarkdownDocumentKit
 
 ![Build Status](https://github.com/giordano137/MarkdownDocumentKit/actions/workflows/swift.yml/badge.svg)
-![Swift 5.10+](https://img.shields.io/badge/swift-5.10%2B-F05138?logo=swift&logoColor=white)
-![Platforms: macOS 13+ | iOS 16+](https://img.shields.io/badge/platform-macOS%2013%2B%20%7C%20iOS%2016%2B-lightgrey)
+[![Swift Version Compatibility for MarkdownDocumentKit](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fgiordano137%2FMarkdownDocumentKit%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/giordano137/MarkdownDocumentKit)
+[![Platform Compatibility for MarkdownDocumentKit](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fgiordano137%2FMarkdownDocumentKit%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/giordano137/MarkdownDocumentKit)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
 A native Swift package that lays out Markdown as an actual structured
