@@ -101,7 +101,10 @@ public enum DocumentRenderer {
             let checkbox = checked ? "\u{2611}" : "\u{2610}"  // ☑ / ☐
             return listParagraph("\(checkbox)  " + text, level: level, theme: theme, formulaRenderer: formulaRenderer)
 
-        case .codeBlock(let lines):
+        case .codeBlock(_, let lines):
+            // `language` isn't drawn anywhere yet — this package doesn't do syntax highlighting
+            // (see `DocumentBlock.codeBlock`'s own doc comment) — but it survives the parse instead
+            // of being discarded, for a consumer that wants to build highlighting on top.
             return codeParagraph(lines, theme: theme)
 
         case .table(let header, let alignments, let rows):

@@ -190,19 +190,19 @@ import Testing
 @Test func parsesFencedCodeBlockAsOneBlock() {
     let markdown = "```\nlet x = 1\nprint(x)\n```"
     let blocks = DocumentParser.parse(markdown)
-    #expect(blocks == [.codeBlock(lines: ["let x = 1", "print(x)"])])
+    #expect(blocks == [.codeBlock(language: nil, lines: ["let x = 1", "print(x)"])])
 }
 
 @Test func codeBlockContentIsNotParsedAsHeadingsOrLists() {
     let markdown = "```\n# not a heading\n- not a list item\n```"
     let blocks = DocumentParser.parse(markdown)
-    #expect(blocks == [.codeBlock(lines: ["# not a heading", "- not a list item"])])
+    #expect(blocks == [.codeBlock(language: nil, lines: ["# not a heading", "- not a list item"])])
 }
 
 @Test func unterminatedCodeBlockStillFlushesAtEndOfDocument() {
     let markdown = "```\nleftover line"
     let blocks = DocumentParser.parse(markdown)
-    #expect(blocks == [.codeBlock(lines: ["leftover line"])])
+    #expect(blocks == [.codeBlock(language: nil, lines: ["leftover line"])])
 }
 
 @Test func parsesMermaidFencedBlockAsDiagramNotCodeBlock() {
@@ -217,10 +217,19 @@ import Testing
     #expect(blocks == [.diagram(source: "graph TD\nA --> B")])
 }
 
-@Test func nonMermaidFencedLanguageStaysAPlainCodeBlock() {
+@Test func nonMermaidFencedLanguageStaysAPlainCodeBlockButKeepsItsLanguageTag() {
+    // Regression coverage for the tag itself surviving — it used to be parsed (to rule out
+    // Mermaid) and then thrown away, leaving no way for a consumer to build syntax highlighting
+    // on top even though the information was right there in the source.
     let markdown = "```swift\nlet x = 1\n```"
     let blocks = DocumentParser.parse(markdown)
-    #expect(blocks == [.codeBlock(lines: ["let x = 1"])])
+    #expect(blocks == [.codeBlock(language: "swift", lines: ["let x = 1"])])
+}
+
+@Test func fencedCodeBlockWithNoLanguageTagHasANilLanguage() {
+    let markdown = "```\nlet x = 1\n```"
+    let blocks = DocumentParser.parse(markdown)
+    #expect(blocks == [.codeBlock(language: nil, lines: ["let x = 1"])])
 }
 
 @Test func parsesSimpleTableWithAlignments() {
@@ -317,7 +326,7 @@ import Testing
             .paragraph(text: "Intro paragraph."),
             .listItem(ordered: false, number: nil, level: 0, text: "First"),
             .listItem(ordered: false, number: nil, level: 0, text: "Second"),
-            .codeBlock(lines: ["code here"]),
+            .codeBlock(language: nil, lines: ["code here"]),
         ]
     )
 }

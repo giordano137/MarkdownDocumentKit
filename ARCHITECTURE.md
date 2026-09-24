@@ -6,7 +6,7 @@ bugs that shaped it. For "what is this and how do I use it," see
 [README.md](README.md) instead; this file is the deep end, not the front
 door.
 
-Phases 1 through 8, plus images, theme injection, and Mermaid diagrams,
+Phases 1 through 9, plus images, theme injection, and Mermaid diagrams,
 done and in real production use by a consuming app's document-export
 feature (parse → render → paginate to PDF/DOCX; a `FormulaRenderer`
 and/or `ImageRenderer`/`DiagramRenderer` implementation is the only glue
@@ -408,6 +408,44 @@ code a consumer needs to add math/images/diagrams on top, and a
       availability check above is therefore the real, current
       verification story for the lowered floor, not a stand-in for a
       simulator run that was simply skipped.
+- [x] Phase 9: fenced code blocks keep their language tag.
+      ` ```swift ` was already parsed (to rule out ` ```mermaid `, the one
+      language tag this package does act on) and then thrown away — a
+      consumer had no way to know a code block was Swift vs. Python vs.
+      untagged at all, only that it was *some* code. `DocumentBlock
+      .codeBlock` gained a `language: String?` field (the fence's info
+      string verbatim, `nil` for a bare ` ``` `) rather than getting a
+      second, near-duplicate case the way `.taskListItem`/`.footnoteDefinition`
+      did in Phase 7: those exist because GFM itself treats a task list
+      item and a footnote reference as semantically different constructs
+      from a plain list item/plain prose, where forcing them into an added
+      field on the existing case would mean juggling states that don't
+      really apply to a plain list item at all (a `checked` field with no
+      meaning outside task items). A tagged code block isn't a different
+      *kind* of block, though — it's the same block gaining one extra,
+      always-optional piece of metadata that every existing renderer
+      already ignores identically — a second case would've meant every
+      switch (including `DocumentRenderer`'s own) handling two
+      near-identical cases for no behavioral difference. Changing the
+      existing case's shape is a real source break for any exhaustive
+      `switch` over `DocumentBlock` (this package's own included — see
+      `DocumentRenderer.blockParagraph`), but pre-1.0 (see README's
+      "Versioning" section) that's an accepted, minor-bump-eligible cost,
+      not a reason to route around it with an awkward second case that
+      would still need one someday if this package ever grows real
+      per-language syntax highlighting.
+
+      `language` isn't drawn anywhere yet — this package still does no
+      syntax highlighting of its own (a full tokenizer/color-theme stack
+      per language is a different scope of feature entirely, and doesn't
+      fit the "zero dependencies" stance any more than a full LaTeX engine
+      would for math). Carrying the tag through means that door isn't
+      closed: a consumer wanting real highlighting has the information
+      needed to build one (most plausibly as an injected protocol, the
+      same `FormulaRenderer`/`ImageRenderer`/`DiagramRenderer` shape this
+      package already uses for capabilities it deliberately doesn't
+      implement itself) instead of the tag being unrecoverably gone by the
+      time any renderer sees the block.
 - [ ] Not currently planned: an automatically generated table of contents.
       Deliberately left out of Phase 7 rather than folded in — it's a
       different scale of work from task lists/footnotes, not just another

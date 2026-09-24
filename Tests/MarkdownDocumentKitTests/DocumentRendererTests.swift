@@ -280,7 +280,7 @@ private struct MockDiagramRenderer: DiagramRenderer {
 }
 
 @Test func rendersCodeBlockLinesJoined() {
-    let blocks: [DocumentBlock] = [.codeBlock(lines: ["let x = 1", "print(x)"])]
+    let blocks: [DocumentBlock] = [.codeBlock(language: nil, lines: ["let x = 1", "print(x)"])]
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
     #expect(attributed.string.contains("let x = 1"))
     #expect(attributed.string.contains("print(x)"))
@@ -290,7 +290,7 @@ private struct MockDiagramRenderer: DiagramRenderer {
     // DOCX picks this attribute up for free via AppKit's OOXML writer; `PDFRenderer` paints it
     // manually (CTFrameDraw ignores it) — this only guards that the attribute itself is actually
     // present on the code block's text, not either renderer.
-    let blocks: [DocumentBlock] = [.codeBlock(lines: ["let x = 1"])]
+    let blocks: [DocumentBlock] = [.codeBlock(language: nil, lines: ["let x = 1"])]
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
     let range = (attributed.string as NSString).range(of: "let x = 1")
     let background = attributed.attribute(.backgroundColor, at: range.location, effectiveRange: nil) as? PlatformColor
@@ -308,7 +308,7 @@ private struct MockDiagramRenderer: DiagramRenderer {
     // `codeBlockCarriesBackgroundColorForShading` above couldn't catch it, since the background
     // color attribute itself was always correct; only the paragraph style's spacing values were
     // wrong for interior lines.
-    let blocks: [DocumentBlock] = [.codeBlock(lines: ["line one", "line two", "line three"])]
+    let blocks: [DocumentBlock] = [.codeBlock(language: nil, lines: ["line one", "line two", "line three"])]
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
 
     func paragraphStyle(containing needle: String) -> NSParagraphStyle? {
@@ -334,7 +334,7 @@ private struct MockDiagramRenderer: DiagramRenderer {
     // window/appearance to resolve against — confirmed by opening an actual generated PDF, not
     // caught by `codeBlockCarriesBackgroundColorForShading` above (attribute presence and color
     // correctness are different assertions).
-    let blocks: [DocumentBlock] = [.codeBlock(lines: ["let x = 1"])]
+    let blocks: [DocumentBlock] = [.codeBlock(language: nil, lines: ["let x = 1"])]
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
     let range = (attributed.string as NSString).range(of: "let x = 1")
     let foreground = attributed.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? PlatformColor

@@ -12,7 +12,7 @@ import Testing
     theme.codeBlockBackground = .red
     theme.codeText = .green
 
-    let blocks: [DocumentBlock] = [.codeBlock(lines: ["let x = 1"])]
+    let blocks: [DocumentBlock] = [.codeBlock(language: nil, lines: ["let x = 1"])]
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "", theme: theme)
     let range = (attributed.string as NSString).range(of: "let x = 1")
     let background = attributed.attribute(.backgroundColor, at: range.location, effectiveRange: nil) as? PlatformColor

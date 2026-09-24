@@ -56,7 +56,17 @@ public enum DocumentBlock: Equatable {
     /// inline math: it stays literal inside whichever block's `text` it's written in, resolved by
     /// `DocumentRenderer` at render time, not decomposed at the model layer.
     case footnoteDefinition(identifier: String, text: String)
-    case codeBlock(lines: [String])
+    /// `language` is the fence's info string verbatim (` ```swift ` → `"swift"`), `nil` for a bare
+    /// ` ``` ` fence with nothing after it — this package renders every code block identically
+    /// regardless (no syntax highlighting; see README's "zero dependencies" reasoning), but
+    /// carrying the tag through rather than discarding it lets a consumer that *does* want
+    /// highlighting build one on top instead of losing the information at parse time with no way
+    /// to get it back. A change to this case's shape (not a new sibling case, unlike `.callout`/
+    /// `.taskListItem`) since this is the same block gaining an extra piece of metadata, not GFM
+    /// treating a tagged code block as a semantically different construct the way a task list item
+    /// is a different list-item kind — a second, near-duplicate case would just mean every consumer
+    /// switch (and `DocumentRenderer`'s own) handling two cases that render identically.
+    case codeBlock(language: String?, lines: [String])
     /// `alignments.count == header.count`; every row in `rows` is padded/truncated to that same
     /// width by the parser, so a renderer never has to guard against ragged input. A cell left
     /// empty (GFM's usual "same as the row above" authoring convention) stays an empty string
@@ -100,7 +110,8 @@ public enum DocumentParser {
             if codeBlockLanguage.lowercased() == "mermaid" {
                 blocks.append(.diagram(source: codeLines.joined(separator: "\n")))
             } else {
-                blocks.append(.codeBlock(lines: codeLines))
+                let language = codeBlockLanguage.isEmpty ? nil : codeBlockLanguage
+                blocks.append(.codeBlock(language: language, lines: codeLines))
             }
             codeLines = []
             codeBlockLanguage = ""
