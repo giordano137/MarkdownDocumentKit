@@ -225,6 +225,26 @@ feature. For the implementation history and design rationale behind each
 piece — including the real bugs that shaped it — see
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## Contributing, issues, and stars
+
+If this package saved you work, a ⭐ is genuinely nice to see — for a small
+package it's about the only signal that anyone out there is using it.
+
+Issues are welcome and never a bother: a bug, a Markdown construct that
+renders wrong, a capability you ran into the absence of, or just a question
+about whether something is *supposed* to behave that way. If something is
+missing for you and you can say why it belongs here, I'll usually take it.
+The one thing I weigh is scope — this package turns finished Markdown into
+finished documents (see "Why this exists" above), so it stays out of live
+editing and incremental/streaming rendering, which belong in the app doing
+the typing. If an idea doesn't fit as-is, that's a conversation, not a no:
+there's often another way in, or a version of it that does fit.
+
+Pull requests are welcome too — [CONTRIBUTING.md](CONTRIBUTING.md) says what
+I actually look at in review, including a section on working with AI (short
+version: it's fine, and you don't need to be able to type the Swift from
+memory).
+
 ## Versioning
 
 Tagged releases follow [SemVer](https://semver.org). Currently pre-1.0
