@@ -219,9 +219,10 @@ limitations" below, and `DocumentTheme.swift`'s own doc comment for why.
 
 ## Status
 
-Phases 1 through 7, plus images, theme injection, and Mermaid diagrams,
-done and in real production use by a consuming app's document-export
-feature. For the implementation history and design rationale behind each
+Phases 1 through 7, plus images, theme injection, Mermaid diagrams, real
+editable DOCX tables, task lists and footnotes — done and in real
+production use by a consuming app's document-export feature. For the
+implementation history and design rationale behind each
 piece — including the real bugs that shaped it — see
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
