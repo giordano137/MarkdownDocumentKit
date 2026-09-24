@@ -23,6 +23,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      # actions/checkout writes the pushed tag into the runner as a *lightweight*
+      # ref pointing at the commit, even with fetch-depth: 0 — the annotation
+      # object isn't kept. `gh release create --notes-from-tag` reads the local
+      # tag, finds no annotation, and silently falls back to the commit message,
+      # which is how v0.5.0 first shipped with the wrong release notes and no
+      # error anywhere. Re-fetching with --force replaces that lightweight ref
+      # with the real annotated object.
+      - name: Restore the annotated tag object checkout flattened
+        run: git fetch --force --tags
+
       - name: Create GitHub Release from the tag's own annotation
         env:
           GH_TOKEN: ${{ github.token }}
