@@ -6,7 +6,7 @@ bugs that shaped it. For "what is this and how do I use it," see
 [README.md](README.md) instead; this file is the deep end, not the front
 door.
 
-Phases 1 through 6, plus images, theme injection, and Mermaid diagrams,
+Phases 1 through 7, plus images, theme injection, and Mermaid diagrams,
 done and in real production use by a consuming app's document-export
 feature (parse → render → paginate to PDF/DOCX; a `FormulaRenderer`
 and/or `ImageRenderer`/`DiagramRenderer` implementation is the only glue
@@ -303,3 +303,83 @@ code a consumer needs to add math/images/diagrams on top, and a
       structural precondition every real editor's schema validation
       actually checks, verifiable without depending on one being installed
       in CI.
+- [x] Phase 7: task lists and footnotes.
+
+      **Task lists** (`- [ ] ...`/`- [x] ...`) parse into their own
+      `.taskListItem(checked:level:text:)` case rather than an added field
+      on `.listItem` — adding an associated value to an existing public
+      enum case source-breaks every exhaustive `switch` over it, in this
+      package and any consumer's, which a new sibling case doesn't (same
+      shape `.callout` already uses relative to `.blockquote`). GFM task
+      list markers are unordered-only (no numbered task list syntax), so
+      this case carries no `ordered`/`number` fields the way `.listItem`
+      does. Rendered via the existing `listParagraph` styling with a
+      checkbox glyph (`☐`/`☑`) in place of a bullet character — no new
+      layout code.
+
+      **Footnotes** (`[^id]` inline, `[^id]: text` as its own line) follow
+      the same "block-level construct gets a `DocumentBlock` case, inline
+      construct stays literal text resolved at render time" split already
+      established for tables and inline math: `.footnoteDefinition
+      (identifier:text:)` is a new block case (`DocumentParser` recognizes
+      the whole-line `[^id]: text` form), but a `[^id]` reference stays
+      literal inside whatever paragraph/list-item/heading/blockquote/
+      callout text it's written in, resolved by `DocumentRenderer`.
+      Numbering follows GFM's own convention — by the order each
+      identifier is first *referenced*, not by where its definition
+      happens to sit in the source — which needs a document-wide pass
+      (`footnoteReferenceNumbers`) before any individual block renders,
+      since a block-local pass (the way inline math's sentinel extraction
+      works, self-contained per paragraph) has no way to know a given
+      reference is the 1st vs. the 3rd occurrence across the whole
+      document. Reference substitution itself (`replaceFootnoteReferences`)
+      runs as a second pass over the already-fully-rendered
+      `NSAttributedString`, swapping each resolvable `[^id]` for a small
+      superscript number — simpler than protecting it with a Private-Use-
+      Area sentinel the way inline math needs (`extractInlineFormulas`),
+      since `[^id]` isn't valid CommonMark link/emphasis syntax to begin
+      with and `NSAttributedString(markdown:)` already passes it through
+      as literal text unchanged. All resolved definitions render once,
+      together, in a trailing "Footnotes" section built from the same
+      `listParagraph` numbered-list styling already used elsewhere, not a
+      new visual style. An unresolved reference (no matching definition)
+      stays literal text; an unreferenced definition is dropped entirely —
+      both match GFM's own behavior, and the "show something honest, not a
+      blank gap" choice every other unresolvable reference in this package
+      already makes.
+
+      `WordDocumentExporter` needed its own copy of this logic (filtering
+      `.footnoteDefinition` before `blockParagraph`, running the same
+      reference-number pass, appending the same trailing section) since it
+      builds a separate `NSAttributedString`, not `attributedString(from:
+      ...)`'s. Building this surfaced the same class of bug Phase 6 already
+      hit once: `.baselineOffset` (the superscript's raised-baseline
+      attribute) gets encoded by AppKit's `.officeOpenXML` writer as a raw
+      `<w:position w:val="N"/>` — a geometric offset, not the semantic
+      `<w:vertAlign w:val="superscript"/>` a real editor's own superscript
+      command would write. Both are spec-legal, and `textutil` (an
+      independent OOXML reader) renders the raw form correctly raised — but
+      Quick Look's own docx preview renders it *lowered* instead, caught
+      only by actually opening a generated `.docx`, not by any
+      string-contains test. `WordDocumentExporter` now substitutes the
+      semantic element in as a post-processing step, the same "patch
+      AppKit's own writer output" technique Phase 6 already established for
+      tables — safe as an unconditional substitution since `.baselineOffset`
+      is exclusively this package's own footnote-superscript signal (never
+      set anywhere else, never negative), so every `<w:position>` a
+      generated `document.xml` could contain came from exactly this and
+      always means "superscript."
+- [ ] Not currently planned: an automatically generated table of contents.
+      Deliberately left out of Phase 7 rather than folded in — it's a
+      different scale of work from task lists/footnotes, not just another
+      block type: `PDFRenderer` only knows which page a heading landed on
+      *after* pagination finishes (CoreText lays out one page at a time; a
+      `CTFramesetter` frame has no page number of its own), so a TOC up
+      front needs a real two-pass pagination — lay out once, record each
+      heading's page, render the TOC block, lay out again — not a parser/
+      renderer change the way every other Phase 7 entry was. For DOCX,
+      computing page numbers this package's own way would be the wrong
+      move regardless: Word already has a native `{ TOC }` field that
+      computes and updates its own page numbers on open, so a DOCX TOC
+      would need its own, different mechanism from the PDF one rather than
+      sharing one implementation. Revisit if a real use case shows up.

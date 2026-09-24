@@ -29,6 +29,55 @@ import Testing
     }
 }
 
+@Test func parsesUncheckedTaskListItem() {
+    let blocks = DocumentParser.parse("- [ ] Buy milk")
+    #expect(blocks == [.taskListItem(checked: false, level: 0, text: "Buy milk")])
+}
+
+@Test func parsesCheckedTaskListItemBothCaseVariants() {
+    for marker in ["[x]", "[X]"] {
+        let blocks = DocumentParser.parse("- \(marker) Done already")
+        #expect(blocks == [.taskListItem(checked: true, level: 0, text: "Done already")])
+    }
+}
+
+@Test func taskListMarkersWorkWithAllThreeBulletCharacters() {
+    for marker in ["- ", "* ", "+ "] {
+        let blocks = DocumentParser.parse("\(marker)[ ] Item")
+        #expect(blocks == [.taskListItem(checked: false, level: 0, text: "Item")])
+    }
+}
+
+@Test func nestedTaskListItemKeepsItsIndentLevel() {
+    let blocks = DocumentParser.parse("  - [x] Nested done")
+    #expect(blocks == [.taskListItem(checked: true, level: 1, text: "Nested done")])
+}
+
+@Test func bracketsNotShapedLikeATaskMarkerStayAPlainListItem() {
+    // "[ ]" needs to be immediately after the bullet with nothing else between them, and needs
+    // the trailing space inside the brackets — "[x]" glued straight to text (no space before the
+    // content) or a non-checkbox bracket shouldn't be mistaken for one.
+    let blocks = DocumentParser.parse("- [Not a checkbox] just text")
+    #expect(blocks == [.listItem(ordered: false, number: nil, level: 0, text: "[Not a checkbox] just text")])
+}
+
+@Test func parsesFootnoteDefinition() {
+    let blocks = DocumentParser.parse("[^1]: This is the footnote text.")
+    #expect(blocks == [.footnoteDefinition(identifier: "1", text: "This is the footnote text.")])
+}
+
+@Test func parsesFootnoteDefinitionWithANonNumericIdentifier() {
+    let blocks = DocumentParser.parse("[^note-a]: Named identifiers work too.")
+    #expect(blocks == [.footnoteDefinition(identifier: "note-a", text: "Named identifiers work too.")])
+}
+
+@Test func footnoteReferenceInsideAParagraphStaysLiteralAtParseTime() {
+    // Resolved by DocumentRenderer at render time, same as inline math — the parser doesn't
+    // decompose it.
+    let blocks = DocumentParser.parse("See the details[^1].")
+    #expect(blocks == [.paragraph(text: "See the details[^1].")])
+}
+
 @Test func parsesOrderedListWithNumber() {
     let blocks = DocumentParser.parse("3. Third item")
     #expect(blocks == [.listItem(ordered: true, number: 3, level: 0, text: "Third item")])

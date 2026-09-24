@@ -59,11 +59,18 @@ public enum WordDocumentExporter {
         var tables: [(header: [String], alignments: [TableAlignment], rows: [[String]])] = []
         let attributed = NSMutableAttributedString()
         attributed.append(DocumentRenderer.styledTitle(title, theme: theme))
+        let footnoteNumbers = DocumentRenderer.footnoteReferenceNumbers(in: blocks)
         for block in blocks {
-            if case .table(let header, let alignments, let rows) = block {
+            switch block {
+            case .table(let header, let alignments, let rows):
                 attributed.append(placeholderParagraph(index: tables.count))
                 tables.append((header, alignments, rows))
-            } else {
+            // Every footnote definition renders once, together, in the trailing "Footnotes"
+            // section appended below — not inline at its own position in the block sequence —
+            // same skip `DocumentRenderer.attributedString(from:...)` applies.
+            case .footnoteDefinition:
+                continue
+            default:
                 attributed.append(
                     DocumentRenderer.blockParagraph(
                         block,
@@ -76,12 +83,21 @@ public enum WordDocumentExporter {
                 )
             }
         }
+        DocumentRenderer.replaceFootnoteReferences(in: attributed, numbers: footnoteNumbers, theme: theme)
+        if let footnotesSection = DocumentRenderer.footnoteDefinitionsSection(
+            blocks: blocks,
+            numbers: footnoteNumbers,
+            theme: theme,
+            formulaRenderer: formulaRenderer
+        ) {
+            attributed.append(footnotesSection)
+        }
 
         let officeOpenXMLData = try attributed.data(
             from: NSRange(location: 0, length: attributed.length),
             documentAttributes: [.documentType: NSAttributedString.DocumentType.officeOpenXML]
         )
-        guard !tables.isEmpty else { return officeOpenXMLData }
+        guard !tables.isEmpty || !footnoteNumbers.isEmpty else { return officeOpenXMLData }
 
         var entries: [ZipEntry]
         do {
@@ -104,6 +120,7 @@ public enum WordDocumentExporter {
                 ) ?? plainTextFallbackXML(header: table.header, rows: table.rows)
             try replacePlaceholderParagraph(index: index, in: &documentXML, with: tableXML)
         }
+        replaceRawPositionWithSemanticSuperscript(in: &documentXML)
 
         let originalEntry = entries[documentIndex]
         entries[documentIndex] = ZipEntry(
@@ -113,6 +130,31 @@ public enum WordDocumentExporter {
             dosDate: originalEntry.dosDate
         )
         return MinimalZipArchive.write(entries)
+    }
+
+    /// AppKit's `.officeOpenXML` writer encodes a footnote reference's `.baselineOffset` (see
+    /// `DocumentRenderer.replaceFootnoteReferences`, the only place this package ever sets that
+    /// attribute) as a raw `<w:position w:val="N"/>` — a geometric "raise this run by N half-points"
+    /// instruction, not the semantic "this run is superscript" `<w:vertAlign>` element a real
+    /// editor's own superscript command would produce. Both are spec-legal and (confirmed via
+    /// `textutil`, an independent OOXML reader) render identically raised in at least one real
+    /// reader — but macOS's own Quick Look docx preview renders a raw `<w:position>` *lowered*
+    /// instead, confirmed by actually opening a generated `.docx` and looking at it, not by any
+    /// string-contains test. Swapping in `<w:vertAlign w:val="superscript"/>` — what Word's own UI
+    /// would write — is the more robustly-understood representation, so every footnote reference
+    /// gets this instead of AppKit's default encoding. Safe as an unconditional, non-positional
+    /// substitution: `.baselineOffset` is exclusively this package's own footnote-superscript
+    /// signal (confirmed — nothing else in this codebase sets it), always positive, so every
+    /// `<w:position>` a generated `document.xml` could possibly contain came from exactly this and
+    /// always means "superscript," never "subscript."
+    private static func replaceRawPositionWithSemanticSuperscript(in documentXML: inout String) {
+        guard let regex = try? NSRegularExpression(pattern: "<w:position w:val=\"\\d+\"/>") else { return }
+        let range = NSRange(location: 0, length: (documentXML as NSString).length)
+        documentXML = regex.stringByReplacingMatches(
+            in: documentXML,
+            range: range,
+            withTemplate: "<w:vertAlign w:val=\"superscript\"/>"
+        )
     }
 
     // MARK: - Placeholder paragraphs

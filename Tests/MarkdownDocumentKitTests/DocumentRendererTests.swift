@@ -218,6 +218,67 @@ private struct MockDiagramRenderer: DiagramRenderer {
     #expect(attributed.string.contains("Fifth"))
 }
 
+@Test func rendersCheckedAndUncheckedTaskListItemsWithDifferentGlyphs() {
+    let blocks: [DocumentBlock] = [
+        .taskListItem(checked: false, level: 0, text: "To do"),
+        .taskListItem(checked: true, level: 0, text: "Done"),
+    ]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+    #expect(attributed.string.contains("\u{2610}"))  // ☐
+    #expect(attributed.string.contains("\u{2611}"))  // ☑
+    #expect(attributed.string.contains("To do"))
+    #expect(attributed.string.contains("Done"))
+}
+
+@Test func footnoteReferenceIsReplacedWithASuperscriptNumberAndDefinitionAppendedAtTheEnd() {
+    let blocks: [DocumentBlock] = [
+        .paragraph(text: "See the details[^1] for more."),
+        .footnoteDefinition(identifier: "1", text: "The actual footnote text."),
+    ]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+
+    #expect(!attributed.string.contains("[^1]"))
+    #expect(attributed.string.contains("See the details1 for more."))
+    #expect(attributed.string.contains("Footnotes"))
+    #expect(attributed.string.contains("1.  The actual footnote text."))
+
+    let numberRange = (attributed.string as NSString).range(of: "details1 for")
+    let digitLocation = numberRange.location + "details".count
+    let baselineOffset = attributed.attribute(.baselineOffset, at: digitLocation, effectiveRange: nil) as? CGFloat
+    #expect((baselineOffset ?? 0) > 0)
+}
+
+@Test func footnotesAreNumberedByFirstReferenceOrderNotDeclarationOrder() {
+    // "second" is defined first in the source but referenced second in the body — GFM numbers by
+    // reference order, so it should come out as footnote 2, not footnote 1.
+    let blocks: [DocumentBlock] = [
+        .footnoteDefinition(identifier: "second", text: "Second definition text."),
+        .footnoteDefinition(identifier: "first", text: "First definition text."),
+        .paragraph(text: "First ref[^first], then second ref[^second]."),
+    ]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+
+    #expect(attributed.string.contains("1.  First definition text."))
+    #expect(attributed.string.contains("2.  Second definition text."))
+}
+
+@Test func unresolvedFootnoteReferenceStaysLiteralText() {
+    let blocks: [DocumentBlock] = [.paragraph(text: "A dangling ref[^missing] with no definition.")]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+    #expect(attributed.string.contains("[^missing]"))
+    #expect(!attributed.string.contains("Footnotes"))
+}
+
+@Test func unreferencedFootnoteDefinitionIsDroppedEntirely() {
+    let blocks: [DocumentBlock] = [
+        .paragraph(text: "No references here."),
+        .footnoteDefinition(identifier: "orphan", text: "Nobody points to me."),
+    ]
+    let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
+    #expect(!attributed.string.contains("Footnotes"))
+    #expect(!attributed.string.contains("Nobody points to me."))
+}
+
 @Test func rendersCodeBlockLinesJoined() {
     let blocks: [DocumentBlock] = [.codeBlock(lines: ["let x = 1", "print(x)"])]
     let attributed = DocumentRenderer.attributedString(from: blocks, title: "")
@@ -552,6 +613,25 @@ private func documentXML(fromDocxData data: Data) throws -> String {
     let blocks: [DocumentBlock] = [.table(header: [], alignments: [], rows: [])]
     let data = try WordDocumentExporter.export(blocks, title: "")
     #expect(!data.isEmpty)
+}
+
+@Test func wordDocumentExporterFootnoteReferenceUsesSemanticSuperscriptNotRawPosition() throws {
+    // Regression coverage for a real, only-visually-obvious bug (caught by actually opening a
+    // generated .docx in Quick Look, not by any earlier string-contains test): AppKit's writer
+    // encodes `.baselineOffset` as a raw `<w:position w:val="N"/>` geometric offset. `textutil` (a
+    // second, independent OOXML reader) renders that raised as intended, but Quick Look's own docx
+    // preview renders it *lowered* instead — `<w:vertAlign w:val="superscript"/>`, the semantic
+    // element a real editor's own superscript command would write, is the more robustly-understood
+    // representation and is what `WordDocumentExporter` now substitutes in.
+    let blocks: [DocumentBlock] = [
+        .paragraph(text: "See the details[^1]."),
+        .footnoteDefinition(identifier: "1", text: "Footnote text."),
+    ]
+    let data = try WordDocumentExporter.export(blocks, title: "")
+    let xml = try documentXML(fromDocxData: data)
+
+    #expect(xml.contains("<w:vertAlign w:val=\"superscript\"/>"))
+    #expect(!xml.contains("<w:position"))
 }
 
 @Test func wordDocumentExporterTableCellsUseTheSameFontFamilyAsTheRestOfTheDocument() throws {

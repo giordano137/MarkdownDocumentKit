@@ -42,7 +42,12 @@ public enum DocumentRenderer {
         let result = NSMutableAttributedString()
         result.append(styledTitle(title, theme: theme))
 
+        // Every footnote definition renders once, together, in the trailing "Footnotes" section
+        // built below — not inline at its own position in the block sequence — so it's skipped
+        // here rather than passed to `blockParagraph`.
+        let footnoteNumbers = footnoteReferenceNumbers(in: blocks)
         for block in blocks {
+            if case .footnoteDefinition = block { continue }
             result.append(
                 blockParagraph(
                     block,
@@ -54,13 +59,19 @@ public enum DocumentRenderer {
                 )
             )
         }
+        replaceFootnoteReferences(in: result, numbers: footnoteNumbers, theme: theme)
+        if let footnotesSection = footnoteDefinitionsSection(blocks: blocks, numbers: footnoteNumbers, theme: theme, formulaRenderer: formulaRenderer) {
+            result.append(footnotesSection)
+        }
         return result
     }
 
     /// One block's styled paragraph(s) — pulled out of `attributedString(from:...)` so
-    /// `wordAttributedString(from:...)` (AppKit-only, see that file's extension) can reuse the
-    /// exact same rendering for every block *except* `.table`, where it substitutes a real
-    /// `NSTextTable`-backed paragraph instead of this function's `TableAttachment` image.
+    /// `WordDocumentExporter.export` (AppKit-only, see that file) can reuse the exact same
+    /// rendering for every block *except* `.table`, where it splices in a real `<w:tbl>` instead
+    /// of this function's `TableAttachment` image (see `WordDocumentExporter`'s own top-of-file
+    /// comment for why that couldn't just be a different `NSAttributedString` built the normal
+    /// way, the way this substitution sounds like it should work).
     static func blockParagraph(
         _ block: DocumentBlock,
         contentWidth: CGFloat,
@@ -86,6 +97,10 @@ public enum DocumentRenderer {
             let bullet = ordered ? "\(number ?? 1).  " : "\(bulletCharacter(forLevel: level))  "
             return listParagraph(bullet + text, level: level, theme: theme, formulaRenderer: formulaRenderer)
 
+        case .taskListItem(let checked, let level, let text):
+            let checkbox = checked ? "\u{2611}" : "\u{2610}"  // ☑ / ☐
+            return listParagraph("\(checkbox)  " + text, level: level, theme: theme, formulaRenderer: formulaRenderer)
+
         case .codeBlock(let lines):
             return codeParagraph(lines, theme: theme)
 
@@ -100,7 +115,124 @@ public enum DocumentRenderer {
 
         case .diagram(let source):
             return diagramParagraph(source: source, contentWidth: contentWidth, theme: theme, diagramRenderer: diagramRenderer)
+
+        case .footnoteDefinition:
+            // Never actually reached: both `attributedString(from:...)` and
+            // `WordDocumentExporter.export` filter `.footnoteDefinition` out before calling
+            // `blockParagraph` — every definition renders once, together, in the trailing
+            // "Footnotes" section (`footnoteDefinitionsSection`), not inline at its original
+            // position in the block sequence. An empty result (not a `fatalError`/non-exhaustive
+            // switch) keeps a stray direct call harmless rather than crashing.
+            return NSAttributedString()
         }
+    }
+
+    // MARK: - Footnotes
+
+    /// Assigns each footnote identifier a number by the order it's first *referenced* (a `[^id]`
+    /// inside some other block's prose text), not by where its `.footnoteDefinition` happens to
+    /// sit in the source — matching GFM's own numbering. Only identifiers that actually have a
+    /// matching definition get a number; an unresolved `[^id]` is left as literal text by
+    /// `replaceFootnoteReferences` below, the same "show something honest, not a blank gap" choice
+    /// every other unresolvable reference in this package already makes.
+    static func footnoteReferenceNumbers(in blocks: [DocumentBlock]) -> [String: Int] {
+        let definedIdentifiers = Set(
+            blocks.compactMap { block -> String? in
+                guard case .footnoteDefinition(let identifier, _) = block else { return nil }
+                return identifier
+            }
+        )
+        guard !definedIdentifiers.isEmpty, let regex = try? NSRegularExpression(pattern: "\\[\\^([^\\]]+)\\]") else { return [:] }
+
+        var numbers: [String: Int] = [:]
+        var nextNumber = 1
+        for block in blocks {
+            guard let text = proseText(of: block) else { continue }
+            let nsRange = NSRange(location: 0, length: (text as NSString).length)
+            for match in regex.matches(in: text, range: nsRange) {
+                guard let idRange = Range(match.range(at: 1), in: text) else { continue }
+                let identifier = String(text[idRange])
+                guard definedIdentifiers.contains(identifier), numbers[identifier] == nil else { continue }
+                numbers[identifier] = nextNumber
+                nextNumber += 1
+            }
+        }
+        return numbers
+    }
+
+    /// The prose text a block's `[^id]` references (if any) live in — `nil` for block types where
+    /// a bracket pair means something else entirely (a table cell, image alt text, code/formula/
+    /// diagram source) rather than prose a footnote reference could sensibly sit in; footnote
+    /// reference support is deliberately bounded to the same text-bearing blocks
+    /// `extractInlineFormulas` already covers via `inlineParagraph`.
+    private static func proseText(of block: DocumentBlock) -> String? {
+        switch block {
+        case .heading(_, let text): return text
+        case .paragraph(let text): return text
+        case .blockquote(let text): return text
+        case .callout(_, let text): return text
+        case .listItem(_, _, _, let text): return text
+        case .taskListItem(_, _, let text): return text
+        case .codeBlock, .table, .formula, .image, .diagram, .footnoteDefinition: return nil
+        }
+    }
+
+    /// Replaces every resolvable `[^id]` left in `attributed`'s already-rendered text with a
+    /// small superscript number — done as a pass over the *finished* string (not a sentinel
+    /// swapped in before the Markdown pass, the way `extractInlineFormulas` protects LaTeX syntax)
+    /// because `[^id]` isn't valid CommonMark link/emphasis syntax to begin with, so
+    /// `NSAttributedString(markdown:)` already passes it through unchanged — nothing to protect it
+    /// from. Reads the surrounding run's own font/color at each match (rather than a single theme
+    /// value) so the superscript's relative size is correct whether the reference sits in body
+    /// text, a heading, or a list item, each a different font size.
+    static func replaceFootnoteReferences(in attributed: NSMutableAttributedString, numbers: [String: Int], theme: DocumentTheme) {
+        guard !numbers.isEmpty, let regex = try? NSRegularExpression(pattern: "\\[\\^([^\\]]+)\\]") else { return }
+        let string = attributed.string
+        let matches = regex.matches(in: string, range: NSRange(location: 0, length: (string as NSString).length))
+
+        for match in matches.reversed() {
+            guard let idRange = Range(match.range(at: 1), in: string) else { continue }
+            let identifier = String(string[idRange])
+            guard let number = numbers[identifier] else { continue }
+
+            var runAttributes = attributed.attributes(at: match.range.location, effectiveRange: nil)
+            let baseFont = (runAttributes[.font] as? PlatformFont) ?? PlatformFont.systemFont(ofSize: theme.bodyFontSize)
+            runAttributes[.font] = PlatformFont.systemFont(ofSize: baseFont.pointSize * 0.7)
+            runAttributes[.baselineOffset] = baseFont.pointSize * 0.35
+            attributed.replaceCharacters(in: match.range, with: NSAttributedString(string: "\(number)", attributes: runAttributes))
+        }
+    }
+
+    /// The trailing "Footnotes" section every resolved definition renders in, together, once —
+    /// reuses `listParagraph`'s own numbered-list styling for each entry (`"1.  text"`) rather
+    /// than inventing a separate visual style for what's already, structurally, a numbered list.
+    /// `nil` when there's nothing to show, so a document with no (resolvable) footnotes gets no
+    /// empty "Footnotes" heading tacked onto the end.
+    static func footnoteDefinitionsSection(
+        blocks: [DocumentBlock],
+        numbers: [String: Int],
+        theme: DocumentTheme,
+        formulaRenderer: FormulaRenderer?
+    ) -> NSAttributedString? {
+        var seenIdentifiers = Set<String>()
+        let definitions = blocks.compactMap { block -> (number: Int, text: String)? in
+            guard case .footnoteDefinition(let identifier, let text) = block,
+                let number = numbers[identifier],
+                !seenIdentifiers.contains(identifier)
+            else { return nil }
+            seenIdentifiers.insert(identifier)
+            return (number, text)
+        }.sorted { $0.number < $1.number }
+        guard !definitions.isEmpty else { return nil }
+
+        let result = NSMutableAttributedString()
+        result.append(headingParagraph("Footnotes", level: 2, theme: theme, formulaRenderer: nil))
+        for definition in definitions {
+            result.append(
+                listParagraph("\(definition.number).  " + definition.text, level: 0, theme: theme, formulaRenderer: formulaRenderer)
+            )
+        }
+        return result
     }
 
     // MARK: - Title

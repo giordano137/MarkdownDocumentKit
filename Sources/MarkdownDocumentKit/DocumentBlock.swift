@@ -37,6 +37,25 @@ public enum DocumentBlock: Equatable {
     /// `DocumentParser`'s blockquote branch for the exact check.
     case callout(kind: CalloutKind, text: String)
     case listItem(ordered: Bool, number: Int?, level: Int, text: String)
+    /// A GFM task list item (`- [ ] ...`/`- [x] ...`) — a separate case rather than an added
+    /// field on `.listItem`, same "specialized variant gets its own case" shape `.callout` already
+    /// uses relative to `.blockquote`: adding a parameter to `.listItem` instead would source-break
+    /// every existing exhaustive `switch` over it, in this package and in any consumer's, for a
+    /// distinction that GFM itself treats as a different list-item kind, not a `.listItem` flag
+    /// (task list markers are only ever unordered — GFM has no numbered task list syntax — so this
+    /// carries no `ordered`/`number` fields `.listItem` has).
+    case taskListItem(checked: Bool, level: Int, text: String)
+    /// A footnote's definition (`[^id]: text`, its own whole line) — GFM convention lets these
+    /// sit anywhere in the source (traditionally grouped at the end), so `DocumentRenderer`
+    /// collects every one into a single "Footnotes" section it appends after the rest of the
+    /// document, numbered by the order each identifier is first *referenced* (a `[^id]` inline in
+    /// some other block's `text`) rather than by where its definition happens to sit in the
+    /// source — matching how GFM itself numbers footnotes. A definition with no matching
+    /// reference anywhere is dropped, not shown, since there'd be no footnote number to give it.
+    /// The reference itself (`[^id]`) is deliberately *not* its own case here, same reasoning as
+    /// inline math: it stays literal inside whichever block's `text` it's written in, resolved by
+    /// `DocumentRenderer` at render time, not decomposed at the model layer.
+    case footnoteDefinition(identifier: String, text: String)
     case codeBlock(lines: [String])
     /// `alignments.count == header.count`; every row in `rows` is padded/truncated to that same
     /// width by the parser, so a renderer never has to guard against ragged input. A cell left
@@ -124,6 +143,12 @@ public enum DocumentParser {
 
             if let image = parseImageLine(trimmed) {
                 blocks.append(image)
+                index += 1
+                continue
+            }
+
+            if let footnote = parseFootnoteDefinition(trimmed) {
+                blocks.append(footnote)
                 index += 1
                 continue
             }
@@ -217,7 +242,11 @@ public enum DocumentParser {
         let level = indent / 2
 
         if content.hasPrefix("- ") || content.hasPrefix("* ") || content.hasPrefix("+ ") {
-            return .listItem(ordered: false, number: nil, level: level, text: String(content.dropFirst(2)))
+            let rest = String(content.dropFirst(2))
+            if let checked = taskListChecked(rest) {
+                return .taskListItem(checked: checked, level: level, text: String(rest.dropFirst(4)))
+            }
+            return .listItem(ordered: false, number: nil, level: level, text: rest)
         }
 
         if let match = content.range(of: "^\\d+\\.\\s+", options: .regularExpression) {
@@ -227,6 +256,15 @@ public enum DocumentParser {
             return .listItem(ordered: true, number: Int(numberString), level: level, text: text)
         }
 
+        return nil
+    }
+
+    /// `nil` for a plain (non-task) list item's content — GFM requires the checkbox marker
+    /// (`[ ]`/`[x]`/`[X]`, exactly one space inside the brackets, then a space before the item's
+    /// text) to sit immediately after the bullet with nothing else between them.
+    private static func taskListChecked(_ content: String) -> Bool? {
+        if content.hasPrefix("[ ] ") { return false }
+        if content.hasPrefix("[x] ") || content.hasPrefix("[X] ") { return true }
         return nil
     }
 
@@ -344,6 +382,20 @@ public enum DocumentParser {
             let sourceRange = Range(match.range(at: 2), in: trimmed)
         else { return nil }
         return .image(altText: String(trimmed[altRange]), source: String(trimmed[sourceRange]))
+    }
+
+    // MARK: - Footnotes
+
+    /// Recognizes a whole-line `[^id]: definition text` — the identifier can't contain `]`, same
+    /// bounded-syntax trade-off `parseImageLine` already makes for its own bracketed pieces.
+    private static func parseFootnoteDefinition(_ trimmed: String) -> DocumentBlock? {
+        guard let regex = try? NSRegularExpression(pattern: "^\\[\\^([^\\]]+)\\]:\\s+(.+)$") else { return nil }
+        let nsRange = NSRange(location: 0, length: (trimmed as NSString).length)
+        guard let match = regex.firstMatch(in: trimmed, range: nsRange),
+            let idRange = Range(match.range(at: 1), in: trimmed),
+            let textRange = Range(match.range(at: 2), in: trimmed)
+        else { return nil }
+        return .footnoteDefinition(identifier: String(trimmed[idRange]), text: String(trimmed[textRange]))
     }
 
     private static func normalizedRow(_ row: [String], toWidth width: Int) -> [String] {

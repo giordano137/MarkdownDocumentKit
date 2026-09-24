@@ -208,14 +208,18 @@ limitations" below, and `DocumentTheme.swift`'s own doc comment for why.
   source text, not a rendered result — this package has zero dependencies
   and does no JS/typesetting on its own.
 - **Markdown support is a bounded subset, not full CommonMark.** The block
-  types this package handles (headings, paragraphs, lists, tables,
-  callouts, code blocks, images, formulas, diagrams) are deliberately the
-  common case a document-export feature actually needs — see "Why this
-  exists" above for the reasoning.
+  types this package handles (headings, paragraphs, lists, task lists,
+  tables, callouts, code blocks, images, formulas, diagrams, footnotes)
+  are deliberately the common case a document-export feature actually
+  needs — see "Why this exists" above for the reasoning. Notably absent:
+  an automatically generated table of contents (see
+  [ARCHITECTURE.md](ARCHITECTURE.md) for why it's a meaningfully bigger
+  undertaking than the rest of this list, not just an oversight) — not
+  currently planned, but if you need it, open an issue.
 
 ## Status
 
-Phases 1 through 5, plus images, theme injection, and Mermaid diagrams,
+Phases 1 through 7, plus images, theme injection, and Mermaid diagrams,
 done and in real production use by a consuming app's document-export
 feature. For the implementation history and design rationale behind each
 piece — including the real bugs that shaped it — see
