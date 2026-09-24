@@ -36,8 +36,27 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Show available simulators
-        run: xcrun simctl list devices available
+      # Resolved instead of pinned: a hardcoded device name ("iPhone 16") rots every time
+      # the runner image ships a new Xcode, and it fails in the worst possible way —
+      # xcodebuild answers an unknown destination by printing the destinations it *does*
+      # know and carrying on, which doesn't necessarily read as an error. So pick whatever
+      # iPhone this image actually has and fail loudly here if there is none.
+      - name: Pick an available iPhone simulator
+        id: simulator
+        run: |
+          set -euo pipefail
+          udid=$(xcrun simctl list devices available --json \
+            | jq -r '[.devices | to_entries[]
+                      | select(.key | test("iOS"))
+                      | .value[] | select(.name | startswith("iPhone"))]
+                     | .[0].udid // empty')
+          if [ -z "$udid" ]; then
+            echo "::error::No available iPhone simulator on this runner image." >&2
+            xcrun simctl list devices available >&2
+            exit 1
+          fi
+          xcrun simctl list devices available | grep "$udid"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
 
       - name: Test on iOS Simulator
-        run: xcodebuild test -scheme MarkdownDocumentKit -destination "platform=iOS Simulator,name=iPhone 16"
+        run: xcodebuild test -scheme MarkdownDocumentKit -destination "id=${{ steps.simulator.outputs.udid }}"
