@@ -6,12 +6,20 @@
 # runs `docc` itself); this file alone is the whole opt-in.
 #
 # `platform: macos` is explicit, not left to default, because it's the
-# platform that sees this package's full public API: the AppKit-only pieces
-# (`WordDocumentExporter`, `OOXMLTableWriter`, `MinimalZipArchive`) only
-# compile under `canImport(AppKit)`, so documenting from an iOS build would
-# silently omit them. There is no UIKit-only public API without an AppKit
-# equivalent, so macOS is strictly the more complete choice here, not an
-# arbitrary one.
+# platform that sees this package's full *public* API: `WordDocumentExporter`
+# and its `WordDocumentExportError` only compile under `canImport(AppKit)`,
+# so documenting from an iOS build would silently omit them. (The DOCX
+# machinery behind them — `OOXMLTableWriter`, `MinimalZipArchive` — is
+# internal and never reaches DocC on any platform.) There is no UIKit-only
+# public API without an AppKit equivalent, so macOS is strictly the more
+# complete choice here, not an arbitrary one.
+#
+# `macos` rather than the `macos-spm` the schema lists: SPIManifest decodes
+# this field through `Platform.init(lenientRawValue:)`, which maps `macos`
+# onto `.macosSpm` — the SwiftPM build, which is the right one for a package
+# with no Xcode project. Don't "correct" it to a platform value that isn't
+# in that enum: the decode is a `flatMap`, so an unrecognized string becomes
+# nil and silently falls back to the default instead of failing the build.
 version: 1
 builder:
   configs:
