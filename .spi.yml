@@ -1,0 +1,19 @@
+# Tells the Swift Package Index build system to generate and host DocC
+# documentation for this package — see
+# https://swiftpackageindex.com/giordano137/MarkdownDocumentKit/information-for-package-maintainers
+# and https://github.com/SwiftPackageIndex/SPIManifest for the schema. No
+# `swift-docc-plugin` dependency needed for this (SPI's own build system
+# runs `docc` itself); this file alone is the whole opt-in.
+#
+# `platform: macos` is explicit, not left to default, because it's the
+# platform that sees this package's full public API: the AppKit-only pieces
+# (`WordDocumentExporter`, `OOXMLTableWriter`, `MinimalZipArchive`) only
+# compile under `canImport(AppKit)`, so documenting from an iOS build would
+# silently omit them. There is no UIKit-only public API without an AppKit
+# equivalent, so macOS is strictly the more complete choice here, not an
+# arbitrary one.
+version: 1
+builder:
+  configs:
+    - platform: macos
+      documentation_targets: [MarkdownDocumentKit]
